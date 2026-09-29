@@ -23,8 +23,15 @@ cargo install macos-airdrop   # or: cargo install --path .
 ```sh
 # Find nearby receivers (browses for 5s by default)
 airdrop list
-# ID               INTERFACES   FLAGS    HOST
-# 571707478742     awdl0        111611   63649ac8-….local:8770
+# Office-Mac  [accepts AirDrop from you]
+#   id        571707478742
+#   network   awdl0  fe80::b855:9dff:fec0:8be6%awdl0  (63 ms)
+#   host      63649ac8-04a4-4bbc-9303-251909ab89c5.local:8770
+#   features  0x1b3fb  links, DVZIP archives, mixed item types, iris, discover, asset bundles  (+unknown bits 0x1b130)
+#   video     HEVC (profiles 1,2,3,4, hardware); ProRes 422 Proxy, 422 LT, 422, 422 HQ, 4444, 4444 XQ
+#   hdr       HDR; Dolby Vision profiles 05, 08
+#   images    AVCI, AVIF, HEIC, HEICS, HEIF
+#   photos    Live Photos v1, asset bundles v1
 
 # Send files, folders and links in one transfer
 airdrop send 571707478742 ./photo.jpg ./notes/ https://example.com
@@ -65,8 +72,9 @@ claude mcp add airdrop -- airdrop mcp
 
 ## How it behaves
 
-- **Receivers are identified by opaque Bonjour IDs.** Device names are only revealed
-  by the receiver during a transfer, so `send` reports them and `list` cannot.
+- **Receivers are identified by opaque Bonjour IDs.** `list` also asks each one for its
+  name and capabilities with AirDrop's `/Discover` request, as Finder does. Receivers
+  set to *Contacts Only* may not answer and then show no name.
 - **IDs can change** when the receiver restarts AirDrop. List again if a send times out
   in `connecting`.
 - **The receiver must be awake and nearby**, with AirDrop set to *Everyone* (or
@@ -82,8 +90,11 @@ claude mcp add airdrop -- airdrop mcp
 - **macOS only**, and built on a **private framework**: a macOS update can change or
   remove the API without notice.
 - Discovery through `SFBrowser` needs a private Apple entitlement, so `list` browses
-  Bonjour (`_airdrop._tcp`, including AWDL) directly. It still opens an `SFBrowser`,
+  Bonjour (`_airdrop._tcp`, including AWDL) and sends `/Discover` itself over a socket
+  opted into peer-to-peer interfaces (`SO_RECV_ANYIF`). It still opens an `SFBrowser`,
   because that is what makes `sharingd` bring up AWDL; without it sends stall.
+- Feature flag names come from [OpenDrop](https://github.com/seemoo-lab/opendrop)'s
+  reverse engineering; newer bits are shown as unknown.
 
 ## License
 

@@ -1,6 +1,8 @@
+mod caps;
 mod cf;
 mod discovery;
 mod mcp;
+mod probe;
 mod send;
 mod sharing;
 
@@ -25,8 +27,8 @@ Typical use:
   airdrop send 571707478742 ./photo.jpg https://example.com
 
 About receivers:
-  - Receivers are listed by opaque Bonjour IDs. Device names are not available before
-    sending; `send` reports the receiver's name and model once it has accepted.
+  - Receivers are addressed by opaque Bonjour IDs. `list` shows each one's device name
+    by asking it the way Finder does (AirDrop /Discover); `send` takes the ID.
   - IDs can change when the receiver restarts AirDrop. List again if `send` stalls in
     `connecting`.
   - The receiver must be awake and nearby, with AirDrop set to Everyone (or Contacts
@@ -55,12 +57,28 @@ enum Command {
     #[command(long_about = "\
 List nearby AirDrop receivers.
 
-Browses for `--wait` seconds and prints each receiver's ID (pass it to `send`), the
-interfaces it was seen on (awdl0 = peer-to-peer Wi-Fi, en0 = shared network) and its
-raw TXT `flags` capability value. An empty list means nobody is discoverable: the
-receiver's screen may be off, or its AirDrop set to Receiving Off.
+Browses Bonjour for `--wait` seconds, then asks each receiver about itself the way Finder
+does (AirDrop /Discover). This Mac is left out. For each receiver it prints:
 
-JSON output (--json): {\"peers\": [{\"id\", \"interfaces\", \"host\", \"port\", \"flags\", \"txt\"}]}")]
+  name, model   device name (and model, when the receiver sends one)
+  accepts       whether it would accept a transfer from you right now
+  id            what `send` takes
+  network       interfaces (awdl0 = peer-to-peer Wi-Fi, en0 = shared network), the
+                address that answered and its response time
+  features      decoded TXT flags (links, archives, mixed item types, ...)
+  video, hdr, images, photos
+                media the receiver can handle (HEVC, ProRes, Dolby Vision, HEIC, ...)
+
+A receiver set to Contacts Only may not answer, and then shows no name. An empty list
+means nobody is discoverable: the receiver's screen may be off, or its AirDrop set to
+Receiving Off.
+
+JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"accepts\",
+\"network\": {\"interfaces\", \"addresses\", \"host\", \"port\", \"responded_via\",
+\"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
+\"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
+\"live_photo_version\", \"asset_bundle_version\"}, \"discover_error\",
+\"raw\": {\"txt\", \"discover\"}}]}")]
     List {
         /// Seconds to browse for.
         #[arg(short, long, default_value_t = 5.0, value_name = "SECS")]
@@ -118,6 +136,68 @@ fn duration(secs: f64) -> Result<Duration, String> {
         .ok_or_else(|| format!("invalid duration {secs}"))
 }
 
+/// Prints one block per receiver: a heading, then labelled detail lines.
+fn print_peer(p: &discovery::Peer) {
+    let name = p.name.as_deref().unwrap_or("(name unknown)");
+    let heading = match &p.model {
+        Some(m) => format!("{name} ({m})"),
+        None => name.to_owned(),
+    };
+    let accepts = match p.accepts {
+        Some(true) => "accepts AirDrop from you",
+        Some(false) => "not accepting from you",
+        None => "did not answer",
+    };
+    println!("{heading}  [{accepts}]");
+    let line = |label: &str, value: &str| println!("  {label:<9} {value}");
+    line("id", &p.id);
+    let net = &p.network;
+    let mut via = net.interfaces.join(",");
+    if let Some(addr) = net.responded_via.as_ref().or(net.addresses.first()) {
+        via += &format!("  {addr}");
+    }
+    if let Some(ms) = net.response_ms {
+        via += &format!("  ({ms} ms)");
+    }
+    line("network", &via);
+    let others: Vec<&String> = net
+        .addresses
+        .iter()
+        .filter(|a| Some(*a) != net.responded_via.as_ref())
+        .collect();
+    if !others.is_empty() && net.responded_via.is_some() {
+        line(
+            "",
+            &format!(
+                "also {}",
+                others
+                    .iter()
+                    .map(|a| a.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        );
+    }
+    if let (Some(h), Some(port)) = (&net.host, net.port) {
+        line("host", &format!("{h}:{port}"));
+    }
+    if let Some(f) = &p.features {
+        let mut v = format!("{}  {}", f.hex, f.describe().join(", "));
+        if let Some(u) = &f.unknown_bits {
+            v += &format!("  (+unknown bits {u})");
+        }
+        line("features", &v);
+    }
+    if let Some(m) = &p.media {
+        for (label, value) in m.describe() {
+            line(label, &value);
+        }
+    }
+    if let Some(e) = &p.discover_error {
+        line("error", &format!("/Discover failed: {e}"));
+    }
+}
+
 fn list(wait: f64, as_json: bool) -> Result<ExitCode, String> {
     let peers = discovery::discover(duration(wait)?)?;
     if as_json {
@@ -127,19 +207,11 @@ fn list(wait: f64, as_json: bool) -> Result<ExitCode, String> {
             "no AirDrop receivers found in {wait}s (is the receiver awake, nearby, and set to Everyone?)"
         );
     } else {
-        println!("{:<16} {:<12} {:<8} HOST", "ID", "INTERFACES", "FLAGS");
-        for p in &peers {
-            let host = match (&p.host, p.port) {
-                (Some(h), Some(port)) => format!("{h}:{port}"),
-                _ => "-".into(),
-            };
-            let flags = p.flags.map_or("-".into(), |f| f.to_string());
-            println!(
-                "{:<16} {:<12} {:<8} {host}",
-                p.id,
-                p.interfaces.join(","),
-                flags
-            );
+        for (i, p) in peers.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            print_peer(p);
         }
     }
     Ok(ExitCode::SUCCESS)

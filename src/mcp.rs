@@ -17,9 +17,9 @@ const INSTRUCTIONS: &str = "\
 Send files and links to nearby Apple devices over AirDrop, from this Mac, with no UI.
 
 Workflow: call list_peers, then send with a peer_id from its result.
-- Peer IDs are opaque Bonjour instance names (e.g. \"571707478742\"). Device names are not \
-available before sending; send reports receiver_name and receiver_model once the receiver \
-has accepted.
+- Peer IDs are opaque Bonjour instance names (e.g. \"571707478742\"); list_peers also \
+returns each receiver's device name, so match on name and send by id. Receivers set to \
+Contacts Only may not report a name.
 - IDs can change when the receiver restarts AirDrop, so list again if send times out in \
 \"connecting\".
 - The receiver must be awake and nearby, with AirDrop set to \"Everyone\" (or \"Contacts \
@@ -32,11 +32,15 @@ fn tools() -> Value {
         {
             "name": "list_peers",
             "title": "List AirDrop receivers",
-            "description": "Browse for nearby AirDrop receivers for wait_secs seconds and return \
-                them. Each peer has an id (pass it to send), the network interfaces it was seen \
-                on (awdl0 = peer-to-peer Wi-Fi, en0 = shared network), and its raw TXT flags. \
-                Human-readable names are not available here. An empty list means nobody is \
-                discoverable: the receiver's screen may be off, or AirDrop set to Receiving Off.",
+            "description": "Browse for nearby AirDrop receivers for wait_secs seconds, then ask \
+                each one about itself (AirDrop /Discover). Each peer has: id (pass it to send), \
+                name, model (when sent), accepts (would it accept from this Mac now), network \
+                (interfaces: awdl0 = peer-to-peer Wi-Fi, en0 = shared network; addresses; \
+                response_ms), features (decoded capability flags), media (video codecs, HDR, \
+                Dolby Vision, image formats) and raw (TXT record and full /Discover reply). \
+                discover_error is set when the receiver did not answer (often Contacts Only). \
+                This Mac is excluded. An empty list means nobody is discoverable: the \
+                receiver's screen may be off, or AirDrop set to Receiving Off.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

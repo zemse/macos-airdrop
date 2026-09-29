@@ -7,7 +7,11 @@ use std::time::Duration;
 
 use core_foundation::runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode};
 use serde::Serialize;
+use serde_json::Value;
 
+use crate::caps::{Features, Media};
+
+use crate::probe;
 use crate::sharing::{Activation, Sharing, main_queue};
 
 type DNSServiceRef = *mut c_void;
@@ -34,6 +38,8 @@ type ResolveReply = extern "C" fn(
     *const u8,
     *mut c_void,
 );
+type AddrInfoReply =
+    extern "C" fn(DNSServiceRef, u32, u32, i32, *const c_char, *const u8, u32, *mut c_void);
 
 unsafe extern "C" {
     fn DNSServiceBrowse(
@@ -55,9 +61,33 @@ unsafe extern "C" {
         cb: ResolveReply,
         ctx: *mut c_void,
     ) -> i32;
+    fn DNSServiceGetAddrInfo(
+        sd: *mut DNSServiceRef,
+        flags: u32,
+        iface: u32,
+        protocol: u32,
+        hostname: *const c_char,
+        cb: AddrInfoReply,
+        ctx: *mut c_void,
+    ) -> i32;
     fn DNSServiceSetDispatchQueue(sd: DNSServiceRef, queue: *const c_void) -> i32;
     fn DNSServiceRefDeallocate(sd: DNSServiceRef);
     fn if_indextoname(index: u32, name: *mut c_char) -> *mut c_char;
+    fn if_nametoindex(name: *const c_char) -> u32;
+    fn getifaddrs(out: *mut *mut IfAddrs) -> i32;
+    fn freeifaddrs(list: *mut IfAddrs);
+}
+
+/// `struct ifaddrs` from `<ifaddrs.h>`.
+#[repr(C)]
+struct IfAddrs {
+    next: *mut IfAddrs,
+    name: *const c_char,
+    flags: u32,
+    addr: *const u8,
+    netmask: *const u8,
+    dstaddr: *const u8,
+    data: *mut c_void,
 }
 
 const FLAG_ADD: u32 = 0x2;
@@ -69,13 +99,40 @@ const SERVICE_TYPE: &CStr = c"_airdrop._tcp";
 pub struct Peer {
     /// Bonjour instance name. This is what `send` takes.
     pub id: String,
+    /// Device name from the receiver's `/Discover` reply.
+    pub name: Option<String>,
+    /// Model name, when the receiver includes it in its reply.
+    pub model: Option<String>,
+    /// Whether the receiver would accept a transfer from this Mac right now.
+    pub accepts: Option<bool>,
+    pub network: Network,
+    /// Decoded TXT `flags`.
+    pub features: Option<Features>,
+    /// Decoded `ReceiverMediaCapabilities`.
+    pub media: Option<Media>,
+    /// Why `/Discover` failed, when it did.
+    pub discover_error: Option<String>,
+    pub raw: Raw,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Network {
     /// Interfaces the service was seen on, e.g. `awdl0`, `en0`.
     pub interfaces: Vec<String>,
+    /// Resolved addresses; IPv6 link-local ones carry their `%interface` scope.
+    pub addresses: Vec<String>,
     pub host: Option<String>,
     pub port: Option<u16>,
-    /// The `flags` TXT value, a capability bitmask.
-    pub flags: Option<u64>,
+    /// The address that answered `/Discover`.
+    pub responded_via: Option<String>,
+    pub response_ms: Option<u64>,
+}
+
+/// Everything as received, for fields this tool does not interpret.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Raw {
     pub txt: BTreeMap<String, String>,
+    pub discover: Option<Value>,
 }
 
 #[derive(Default)]
@@ -140,8 +197,8 @@ extern "C" fn on_browse(
     let ifname = interface_name(iface);
     if flags & FLAG_ADD == 0 {
         if let Some(peer) = st.peers.get_mut(&id) {
-            peer.interfaces.retain(|i| *i != ifname);
-            if peer.interfaces.is_empty() {
+            peer.network.interfaces.retain(|i| *i != ifname);
+            if peer.network.interfaces.is_empty() {
                 st.peers.remove(&id);
             }
         }
@@ -149,14 +206,17 @@ extern "C" fn on_browse(
     }
     let peer = st.peers.entry(id.clone()).or_insert_with(|| Peer {
         id,
-        interfaces: Vec::new(),
-        host: None,
-        port: None,
-        flags: None,
-        txt: BTreeMap::new(),
+        name: None,
+        model: None,
+        accepts: None,
+        network: Network::default(),
+        features: None,
+        media: None,
+        discover_error: None,
+        raw: Raw::default(),
     });
-    if !peer.interfaces.contains(&ifname) {
-        peer.interfaces.push(ifname);
+    if !peer.network.interfaces.contains(&ifname) {
+        peer.network.interfaces.push(ifname);
     }
     let mut sd: DNSServiceRef = std::ptr::null_mut();
     let e = unsafe {
@@ -180,7 +240,7 @@ extern "C" fn on_browse(
 extern "C" fn on_resolve(
     _sd: DNSServiceRef,
     _flags: u32,
-    _iface: u32,
+    iface: u32,
     err: i32,
     fullname: *const c_char,
     host: *const c_char,
@@ -202,15 +262,133 @@ extern "C" fn on_resolve(
     } else {
         unsafe { std::slice::from_raw_parts(txt, txt_len as usize) }
     };
-    if let Some(peer) = state.borrow_mut().peers.get_mut(id) {
-        peer.host = Some(text(host).trim_end_matches('.').to_owned());
-        peer.port = Some(u16::from_be(port));
-        peer.txt = parse_txt(raw);
-        peer.flags = peer.txt.get("flags").and_then(|f| f.parse().ok());
+    let mut st = state.borrow_mut();
+    let Some(peer) = st.peers.get_mut(id) else {
+        return;
+    };
+    peer.network.host = Some(text(host).trim_end_matches('.').to_owned());
+    peer.network.port = Some(u16::from_be(port));
+    peer.raw.txt = parse_txt(raw);
+    peer.features = peer
+        .raw
+        .txt
+        .get("flags")
+        .and_then(|f| f.parse().ok())
+        .map(Features::decode);
+    let mut sd: DNSServiceRef = std::ptr::null_mut();
+    let e =
+        unsafe { DNSServiceGetAddrInfo(&mut sd, FLAG_INCLUDE_AWDL, iface, 0, host, on_addr, ctx) };
+    if e == 0 {
+        unsafe { DNSServiceSetDispatchQueue(sd, main_queue()) };
+        st.resolving.push(sd);
     }
 }
 
-/// Browses for `wait`, then returns every receiver still advertising.
+/// Formats a `sockaddr_in`/`sockaddr_in6`.
+fn sockaddr_text(sa: *const u8, iface: u32) -> Option<String> {
+    const AF_INET: u8 = 2;
+    const AF_INET6: u8 = 30;
+    let family = unsafe { *sa.add(1) };
+    match family {
+        AF_INET => {
+            let b: [u8; 4] = unsafe { *(sa.add(4) as *const [u8; 4]) };
+            Some(std::net::Ipv4Addr::from(b).to_string())
+        }
+        AF_INET6 => {
+            let mut b: [u8; 16] = unsafe { *(sa.add(8) as *const [u8; 16]) };
+            if b[0] == 0xfe && b[1] & 0xc0 == 0x80 {
+                // The kernel embeds the scope in bytes 2-3 of link-local addresses.
+                b[2] = 0;
+                b[3] = 0;
+            }
+            let ip = std::net::Ipv6Addr::from(b);
+            Some(if ip.is_unicast_link_local() {
+                format!("{ip}%{}", interface_name(iface))
+            } else {
+                ip.to_string()
+            })
+        }
+        _ => None,
+    }
+}
+
+extern "C" fn on_addr(
+    _sd: DNSServiceRef,
+    flags: u32,
+    iface: u32,
+    err: i32,
+    host: *const c_char,
+    addr: *const u8,
+    _ttl: u32,
+    ctx: *mut c_void,
+) {
+    if err != 0 || addr.is_null() || flags & FLAG_ADD == 0 {
+        return;
+    }
+    let Some(addr) = sockaddr_text(addr, iface) else {
+        return;
+    };
+    let state = unsafe { &*(ctx as *const RefCell<State>) };
+    let host = text(host);
+    let host = host.trim_end_matches('.');
+    for peer in state.borrow_mut().peers.values_mut() {
+        let net = &mut peer.network;
+        if net.host.as_deref() == Some(host) && !net.addresses.contains(&addr) {
+            net.addresses.push(addr.clone());
+        }
+    }
+}
+
+/// This Mac's own interface addresses, formatted like `Peer::addresses`.
+fn local_addresses() -> Vec<String> {
+    let mut list: *mut IfAddrs = std::ptr::null_mut();
+    if unsafe { getifaddrs(&mut list) } != 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut cur = list;
+    while let Some(ifa) = unsafe { cur.as_ref() } {
+        if !ifa.addr.is_null() {
+            let index = unsafe { if_nametoindex(ifa.name) };
+            out.extend(sockaddr_text(ifa.addr, index));
+        }
+        cur = ifa.next;
+    }
+    unsafe { freeifaddrs(list) };
+    out
+}
+
+/// Asks every peer for its name in parallel, preferring AWDL addresses.
+fn identify(peers: &mut [Peer], timeout: Duration) {
+    std::thread::scope(|scope| {
+        for peer in peers.iter_mut() {
+            let (Some(host), Some(port)) = (peer.network.host.clone(), peer.network.port) else {
+                continue;
+            };
+            scope.spawn(move || {
+                let mut addresses = peer.network.addresses.clone();
+                addresses.sort_by_key(|a| !a.ends_with("%awdl0"));
+                match probe::discover(&addresses, port, &host, timeout) {
+                    Ok(r) => {
+                        let text = |k: &str| r.reply[k].as_str().map(str::to_owned);
+                        peer.name = text("ReceiverComputerName");
+                        peer.model = text("ReceiverModelName");
+                        peer.accepts = r.reply["IsAirDropable"].as_bool();
+                        let caps = &r.reply["ReceiverMediaCapabilities"];
+                        peer.media = caps.is_object().then(|| Media::parse(caps));
+                        peer.network.responded_via = Some(r.via);
+                        peer.network.response_ms = Some(r.response_ms);
+                        peer.raw.discover = Some(r.reply);
+                    }
+                    Err(e) => peer.discover_error = Some(e),
+                }
+            });
+        }
+    });
+}
+
+/// Browses for `wait`, then returns every other receiver still advertising, with the names
+/// they report.
 pub fn discover(wait: Duration) -> Result<Vec<Peer>, String> {
     let sharing = Sharing::get()?;
     let _activation = Activation::start(sharing);
@@ -245,7 +423,15 @@ pub fn discover(wait: Duration) -> Result<Vec<Peer>, String> {
     if let Some(e) = st.error.take() {
         return Err(e);
     }
-    Ok(std::mem::take(&mut st.peers).into_values().collect())
+    let local = local_addresses();
+    let mut peers: Vec<Peer> = std::mem::take(&mut st.peers)
+        .into_values()
+        .filter(|p| !p.network.addresses.iter().any(|a| local.contains(a)))
+        .collect();
+    drop(st);
+    // Still inside the activation, so AWDL stays up while the peers are asked.
+    identify(&mut peers, Duration::from_secs(4));
+    Ok(peers)
 }
 
 #[cfg(test)]
