@@ -20,7 +20,7 @@ Workflow: call list_peers, then send with a peer_id from its result.
 - Peer IDs are opaque Bonjour instance names (e.g. \"571707478742\"); list_peers also \
 returns each receiver's device name, so match on name and send by id. Receivers set to \
 Contacts Only withhold their name (mode = contacts_only) and only appear at all if they \
-likely have this Mac's owner as a contact; their ID changes when they switch AirDrop mode.
+likely have this Mac's owner as a contact; their ID can change when they switch AirDrop mode.
 - IDs can change when the receiver restarts AirDrop, so list again if send times out in \
 \"connecting\".
 - The receiver must be awake and nearby, with AirDrop set to \"Everyone\" (or \"Contacts \

@@ -91,16 +91,16 @@ claude mcp add airdrop -- airdrop mcp
 - **Receivers are identified by opaque Bonjour IDs.** `list` also asks each one for its
   name and capabilities with AirDrop's `/Discover` request, as Finder does. Receivers
   set to *Contacts Only* answer but withhold their name and feature flags, and their ID
-  changes whenever they switch AirDrop mode.
+  can change when they switch AirDrop mode.
 - **Contacts Only receivers are visible only if they have you.** `list` makes `sharingd`
   advertise 2-byte hashes of your phone numbers and emails over Bluetooth; a Contacts Only
   receiver opens its AirDrop service only when one matches its contacts. So a hidden-name
   receiver in `list` likely has you saved (2-byte hashes can collide), and one that does
   not have you does not appear at all.
 - **Names are remembered.** `list` saves every name a receiver reports, with its ID, host
-  and link-local addresses, in `~/.airdrop/known.json`. A receiver that switches to
-  Contacts Only gets a new ID and host, but its AWDL address stayed the same across mode
-  switches in testing, so `list` still shows its name, marked *remembered*, with a
+  and link-local addresses, in `~/.airdrop/known.json`. A receiver can get a new
+  ID and host when it switches AirDrop mode, but its AWDL address stayed the same across
+  mode switches in testing, so `list` still shows its name, marked *remembered*, with a
   `known` line saying which identifier matched. `airdrop name ID NAME` names one by hand.
   Addresses can rotate (for example after a restart), so treat it as a strong hint.
 - **IDs can change** when the receiver restarts AirDrop. List again if a send times out

@@ -104,14 +104,14 @@ The decoding comes from reverse engineering done on iOS 13 and can be wrong on n
 systems.
 
 Known names: every name a receiver reports is remembered in ~/.airdrop/known.json with
-its ID, host and link-local addresses. A receiver gets a new ID and host when it switches
+its ID, host and link-local addresses. A receiver can get a new ID and host when it switches
 AirDrop mode, but its AWDL address stayed the same across switches in testing, so when it
 later answers in Contacts Only mode `list` shows the remembered name, marked remembered,
 and a `known` line saying when it was named and which identifier matched. Name one by
 hand with `airdrop name`, drop one with `airdrop forget`. Addresses can rotate (for
 example after a restart), so a remembered name is a strong hint, not proof.
 
-A receiver's ID and host change when it switches AirDrop mode. An empty list
+A receiver's ID and host can change when it switches AirDrop mode. An empty list
 means nobody is discoverable: the receiver's screen may be off, or its AirDrop set to
 Receiving Off.
 

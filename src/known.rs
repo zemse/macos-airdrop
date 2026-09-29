@@ -1,8 +1,9 @@
 //! Remembers receivers' names in `~/.airdrop/known.json`, so a receiver that later switches to
 //! Contacts Only (and withholds its name) can still be recognised.
 //!
-//! A receiver gets a new Bonjour ID and host each time it switches AirDrop mode, but in testing
-//! its link-local AWDL address stayed the same for hours, across mode switches. Records are
+//! A receiver's host changed on every AirDrop mode switch in testing, and its Bonjour ID on every
+//! switch to Everyone, but its link-local AWDL address stayed the same for hours, across mode
+//! switches. Records are
 //! matched on any of the three, and learn the new ones each time they match.
 
 use std::path::PathBuf;
