@@ -77,14 +77,11 @@ pub mod event {
     }
 }
 
-type NodeCopyFn = unsafe extern "C" fn(SFNodeRef) -> CFTypeRef;
-
 pub struct Sharing {
     pub browser_create: unsafe extern "C" fn(CFAllocatorRef, CFStringRef) -> SFBrowserRef,
     pub browser_set_client: unsafe extern "C" fn(SFBrowserRef, BrowserCallback, *mut ClientContext),
     pub browser_set_dispatch_queue: unsafe extern "C" fn(SFBrowserRef, *const c_void),
     pub browser_open_node: unsafe extern "C" fn(SFBrowserRef, SFNodeRef, CFStringRef, u64),
-    pub browser_copy_children: unsafe extern "C" fn(SFBrowserRef, SFNodeRef) -> CFTypeRef,
     pub browser_invalidate: unsafe extern "C" fn(SFBrowserRef),
 
     pub operation_create: unsafe extern "C" fn(
@@ -100,29 +97,19 @@ pub struct Sharing {
     pub operation_resume: unsafe extern "C" fn(SFOperationRef),
     pub operation_cancel: unsafe extern "C" fn(SFOperationRef),
 
-    pub node_copy_display_name: NodeCopyFn,
-    pub node_copy_computer_name: NodeCopyFn,
-    pub node_copy_secondary_name: NodeCopyFn,
-    pub node_copy_real_name: NodeCopyFn,
-    pub node_copy_model: NodeCopyFn,
-    pub node_copy_kinds: NodeCopyFn,
     pub node_create: unsafe extern "C" fn(CFAllocatorRef, CFStringRef, CFStringRef) -> SFNodeRef,
     pub node_set_real_name: unsafe extern "C" fn(SFNodeRef, CFStringRef),
     pub node_set_display_name: unsafe extern "C" fn(SFNodeRef, CFStringRef),
     pub node_set_kinds: unsafe extern "C" fn(SFNodeRef, CFTypeRef),
-    pub k_node_kind_airdrop: CFStringRef,
-    pub node_add_domain: unsafe extern "C" fn(SFNodeRef, CFStringRef),
     pub node_set_domain: unsafe extern "C" fn(SFNodeRef, CFStringRef),
     pub node_set_service_name: unsafe extern "C" fn(SFNodeRef, CFStringRef),
     pub node_add_bonjour_protocol: unsafe extern "C" fn(SFNodeRef, CFStringRef),
 
+    pub k_node_kind_airdrop: CFStringRef,
     pub k_browser_kind_airdrop: CFStringRef,
     pub k_operation_kind_sender: CFStringRef,
     pub k_operation_items: CFStringRef,
     pub k_operation_node: CFStringRef,
-    pub k_operation_error: CFStringRef,
-    pub k_operation_bytes_copied: CFStringRef,
-    pub k_operation_total_bytes: CFStringRef,
 }
 
 // The CFStringRef constants are immutable framework globals.
@@ -161,6 +148,7 @@ impl Sharing {
             .map_err(Clone::clone)
     }
 
+    #[allow(clippy::missing_transmute_annotations)] // Each target type comes from the field.
     unsafe fn load() -> Result<Sharing, String> {
         let handle = unsafe { dlopen(SHARING_PATH.as_ptr(), RTLD_NOW) };
         if handle.is_null() {
@@ -192,7 +180,6 @@ impl Sharing {
             browser_set_client: func!(c"SFBrowserSetClient"),
             browser_set_dispatch_queue: func!(c"SFBrowserSetDispatchQueue"),
             browser_open_node: func!(c"SFBrowserOpenNode"),
-            browser_copy_children: func!(c"SFBrowserCopyChildren"),
             browser_invalidate: func!(c"SFBrowserInvalidate"),
 
             operation_create: func!(c"SFOperationCreate"),
@@ -202,29 +189,62 @@ impl Sharing {
             operation_resume: func!(c"SFOperationResume"),
             operation_cancel: func!(c"SFOperationCancel"),
 
-            node_copy_display_name: func!(c"SFNodeCopyDisplayName"),
-            node_copy_computer_name: func!(c"SFNodeCopyComputerName"),
-            node_copy_secondary_name: func!(c"SFNodeCopySecondaryName"),
-            node_copy_real_name: func!(c"SFNodeCopyRealName"),
-            node_copy_model: func!(c"SFNodeCopyModel"),
-            node_copy_kinds: func!(c"SFNodeCopyKinds"),
             node_create: func!(c"SFNodeCreate"),
             node_set_real_name: func!(c"SFNodeSetRealName"),
             node_set_display_name: func!(c"SFNodeSetDisplayName"),
             node_set_kinds: func!(c"SFNodeSetKinds"),
-            k_node_kind_airdrop: string_const!(c"kSFNodeKindAirDrop"),
-            node_add_domain: func!(c"SFNodeAddDomain"),
             node_set_domain: func!(c"SFNodeSetDomain"),
             node_set_service_name: func!(c"SFNodeSetServiceName"),
             node_add_bonjour_protocol: func!(c"SFNodeAddBonjourProtocol"),
 
+            k_node_kind_airdrop: string_const!(c"kSFNodeKindAirDrop"),
             k_browser_kind_airdrop: string_const!(c"kSFBrowserKindAirDrop"),
             k_operation_kind_sender: string_const!(c"kSFOperationKindSender"),
             k_operation_items: string_const!(c"kSFOperationItemsKey"),
             k_operation_node: string_const!(c"kSFOperationNodeKey"),
-            k_operation_error: string_const!(c"kSFOperationErrorKey"),
-            k_operation_bytes_copied: string_const!(c"kSFOperationBytesCopiedKey"),
-            k_operation_total_bytes: string_const!(c"kSFOperationTotalBytesKey"),
         })
+    }
+}
+
+extern "C" fn ignore_browser_event(
+    _b: SFBrowserRef,
+    _n: SFNodeRef,
+    _p: CFStringRef,
+    _flags: u32,
+    _err: i32,
+    _info: *mut c_void,
+) {
+}
+
+/// An open AirDrop `SFBrowser`.
+///
+/// Without the private discovery entitlement it never reports any nodes, but opening it makes
+/// `sharingd` start its Bonjour, BLE and AWDL discovery. Peers on AWDL are not reachable, and
+/// sends stall in `connecting`, unless one is open.
+pub struct Activation {
+    browser: SFBrowserRef,
+    _ctx: Box<ClientContext>,
+}
+
+impl Activation {
+    /// Opens the browser. Callbacks are delivered on the main queue, so the caller must run the
+    /// main run loop for anything to happen.
+    pub fn start(s: &'static Sharing) -> Self {
+        let mut ctx = Box::new(ClientContext::new(std::ptr::null_mut()));
+        unsafe {
+            let browser = (s.browser_create)(std::ptr::null(), s.k_browser_kind_airdrop);
+            (s.browser_set_dispatch_queue)(browser, main_queue());
+            (s.browser_set_client)(browser, ignore_browser_event, &mut *ctx);
+            (s.browser_open_node)(browser, std::ptr::null_mut(), std::ptr::null(), 0);
+            Self { browser, _ctx: ctx }
+        }
+    }
+}
+
+impl Drop for Activation {
+    fn drop(&mut self) {
+        if let Ok(s) = Sharing::get() {
+            unsafe { (s.browser_invalidate)(self.browser) };
+        }
     }
 }

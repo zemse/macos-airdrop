@@ -1,7 +1,20 @@
 [package]
-name = "airdrop"
+name = "macos-airdrop"
 version = "0.1.0"
 edition = "2024"
+description = "AirDrop files and links from the macOS terminal with no UI, plus an MCP server for agents."
+authors = ["Soham Zemse <soham@zemse.in>"]
+license = "MIT"
+repository = "https://github.com/zemse/macos-airdrop"
+readme = "README.md"
+keywords = ["airdrop", "macos", "awdl", "mcp", "cli"]
+categories = ["command-line-utilities", "os::macos-apis"]
+# Whitelist what ships to crates.io (never blacklist).
+include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+
+[[bin]]
+name = "airdrop"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
