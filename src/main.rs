@@ -78,11 +78,14 @@ does (AirDrop /Discover). This Mac is left out. For each receiver it prints:
                 media the receiver can handle (HEVC, ProRes, Dolby Vision, HEIC, ...)
 
 After the receivers it lists \"hidden\" devices: ones whose Bluetooth LE advertisements
-(Continuity Nearby Info) say AirDrop receiving is on, such as Contacts Only receivers
-without you in their contacts. Each line shows signal strength, the device's Bluetooth
-identifier and a guess at its kind. They cannot be matched to the receivers above, so
-those show up here too, and a device whose AirDrop is on but screen is off may not be
-reachable. The first run asks for Bluetooth access for your terminal app.
+(Continuity Nearby Info) say AirDrop receiving is on. That bit only means AirDrop is not
+Receiving Off; it is the same for Everyone and Contacts Only. Each line shows signal
+strength, the device's Bluetooth identifier and a guess at its kind. They cannot be
+matched to the receivers above, so those show up here too. When more devices have
+AirDrop on than there are receivers above, the difference is reported as likely hiding
+from you (Contacts Only without you as a contact). A device whose AirDrop is on but
+screen is off may not be reachable. The first run asks for Bluetooth access for your
+terminal app.
 
 --debug adds two raw views:
   awdl          Apple devices answering an IPv6 ping on AWDL that are not receivers
@@ -103,8 +106,8 @@ JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"airdropable\"
 \"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
 \"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
 \"live_photo_version\", \"asset_bundle_version\"}, \"discover_error\",
-\"raw\": {\"txt\", \"discover\"}}], \"hidden\": [{\"id\", \"name\", \"rssi\", \"kind\",
-\"airdrop\", \"messages\": [{\"type\", \"name\", \"details\", \"hex\"}]}], \"hidden_error\",
+\"raw\": {\"txt\", \"discover\"}}], \"likely_hiding\", \"hidden\": [{\"id\", \"name\", \"rssi\", \"kind\",
+\"airdrop\", \"messages\": [{\"type\", \"name\", \"details\", \"unverified\", \"hex\"}]}], \"hidden_error\",
 \"awdl\": [{\"address\"}], \"awdl_error\", \"ble\": [same as hidden]}; awdl, awdl_error and
 ble only with --debug.")]
     List {
@@ -252,6 +255,9 @@ fn print_ble_device(d: &ble::BleDevice, messages: bool) {
         if !m.details.is_empty() {
             line += &format!("{}  ", m.details.join(", "));
         }
+        if !m.unverified.is_empty() {
+            line += &format!("(unverified: {})  ", m.unverified.join(", "));
+        }
         line += &format!("[{}]", m.hex);
         println!("{line}");
     }
@@ -285,11 +291,20 @@ fn list(wait: f64, as_json: bool, debug: bool) -> Result<ExitCode, String> {
     if !scan.hidden.is_empty() {
         gap();
         println!(
-            "hidden: {} with AirDrop on nearby (Bluetooth), may include the receivers above",
+            "hidden: {} with AirDrop on nearby (Bluetooth; Everyone or Contacts Only), may include the receivers above",
             plural(scan.hidden.len(), "device")
         );
         for d in &scan.hidden {
             print_ble_device(d, false);
+        }
+        if scan.likely_hiding > 0 {
+            let n = scan.likely_hiding;
+            let devices = if n == 1 { "device is" } else { "devices are" };
+            println!(
+                "  so at least {n} {devices} likely hiding from you: {} with AirDrop on, {} visible above",
+                scan.hidden.len(),
+                plural(scan.peers.len(), "receiver")
+            );
         }
     }
     let awdl = scan.awdl.as_deref().unwrap_or_default();

@@ -99,10 +99,13 @@ const SERVICE_TYPE: &CStr = c"_airdrop._tcp";
 #[derive(Debug, Clone, Serialize)]
 pub struct Scan {
     pub peers: Vec<Peer>,
-    /// Devices advertising AirDrop receiving on over Bluetooth LE, nearest first, e.g.
-    /// Contacts Only receivers without us in their contacts. Cannot be matched to `peers`,
-    /// so receivers listed there show up here too.
+    /// Devices advertising AirDrop receiving on over Bluetooth LE, nearest first: set to
+    /// Everyone or Contacts Only, including Contacts Only receivers without us in their
+    /// contacts. Cannot be matched to `peers`, so receivers listed there show up here too.
     pub hidden: Vec<ble::BleDevice>,
+    /// How many more devices have AirDrop on (per `hidden`) than there are receivers in
+    /// `peers`: at least this many are likely hiding from us.
+    pub likely_hiding: usize,
     /// Why the Bluetooth scan failed, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hidden_error: Option<String>,
@@ -474,7 +477,7 @@ pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
         Ok(devices) => (devices, None),
         Err(e) => (Vec::new(), Some(e)),
     };
-    let hidden = ble
+    let hidden: Vec<ble::BleDevice> = ble
         .iter()
         .filter(|d| d.airdrop == Some(true))
         .cloned()
@@ -517,9 +520,11 @@ pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
         ),
         Some(Err(e)) => (Some(Vec::new()), Some(e)),
     };
+    let likely_hiding = hidden.len().saturating_sub(peers.len());
     Ok(Scan {
         peers,
         hidden,
+        likely_hiding,
         hidden_error,
         awdl,
         awdl_error,

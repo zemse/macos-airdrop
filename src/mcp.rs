@@ -44,9 +44,11 @@ fn tools() -> Value {
                 a name or features and is only visible if it likely has you as a contact. \
                 discover_error is set when the receiver did not answer. \
                 hidden lists devices whose Bluetooth \
-                advertisements say AirDrop receiving is on (e.g. Contacts Only receivers \
-                without you as a contact); they cannot be matched to peers, so peers show up \
-                there too. With debug, awdl lists anonymous Apple devices answering on AWDL \
+                advertisements say AirDrop receiving is on (Everyone or Contacts Only; the \
+                bit only distinguishes Receiving Off); they cannot be matched to peers, so \
+                peers show up there too. likely_hiding = hidden count minus peers count: at \
+                least that many devices are likely Contacts Only without you as a contact. \
+                Message fields under unverified come from old research and may be wrong. With debug, awdl lists anonymous Apple devices answering on AWDL \
                 and ble every Apple device heard over Bluetooth LE with decoded Continuity \
                 messages. This Mac is excluded. Empty peers means nobody is \
                 discoverable to you: the \

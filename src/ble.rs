@@ -51,6 +51,11 @@ pub struct Message {
     pub name: Option<&'static str>,
     /// Decoded fields, as short phrases.
     pub details: Vec<String>,
+    /// Decoded fields whose meaning comes from pre-2021 research and has not been confirmed
+    /// on current devices (e.g. Nearby Info activity, which labels a phone on a desk as
+    /// "driving").
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unverified: Vec<String>,
     pub hex: String,
     #[serde(skip)]
     pub payload: Vec<u8>,
@@ -113,22 +118,24 @@ fn airpods_model(model: u16) -> Option<&'static str> {
 impl Message {
     pub fn decode(kind: u8, payload: &[u8]) -> Self {
         let mut details = Vec::new();
+        let mut unverified = Vec::new();
         match (kind, payload) {
             (0x10, [status, rest @ ..]) => {
+                // Confirmed on a current iPhone: only this bit flips when AirDrop is set to Receiving
+                // Off, and it stays set in both Everyone and Contacts Only.
+                let airdrop = if status & 0x40 != 0 { "on" } else { "off" };
+                details.push(format!("AirDrop receiving {airdrop}"));
                 let code = status & 0x0f;
-                details.push(match activity(code) {
+                unverified.push(match activity(code) {
                     Some(a) => a.to_owned(),
                     None => format!("activity {code:#x}"),
                 });
-                if status & 0x40 != 0 {
-                    details.push("AirDrop receiving on".into());
-                }
                 if status & 0x10 != 0 {
-                    details.push("primary iCloud device".into());
+                    unverified.push("primary iCloud device".into());
                 }
                 if let Some(data) = rest.first() {
                     let wifi = if data & 0x04 != 0 { "on" } else { "off" };
-                    details.push(format!("Wi-Fi {wifi}"));
+                    unverified.push(format!("Wi-Fi {wifi}"));
                 }
             }
             // Other prefixes use a different, undocumented layout.
@@ -168,6 +175,7 @@ impl Message {
             kind,
             name: type_name(kind),
             details,
+            unverified,
             hex: hex(payload),
             payload: payload.to_vec(),
         }
@@ -379,10 +387,21 @@ mod tests {
         .unwrap();
         assert_eq!(m.len(), 2);
         assert_eq!(m[0].name, Some("nearby info"));
-        assert_eq!(m[0].details, ["active", "AirDrop receiving on", "Wi-Fi on"]);
+        assert_eq!(m[0].details, ["AirDrop receiving on"]);
+        assert_eq!(m[0].unverified, ["active", "Wi-Fi on"]);
         assert_eq!(m[0].hex, "4b1c839096");
         assert_eq!(m[1].name, Some("Handoff"));
         assert_eq!(m[1].hex, "005a48");
+    }
+
+    #[test]
+    fn airdrop_bit_on_an_iphone() {
+        // Captured from one iPhone before and after setting AirDrop to Receiving Off.
+        let on = Message::decode(0x10, &[0x75, 0x1c, 0xc8, 0x50, 0x8b]);
+        let off = Message::decode(0x10, &[0x35, 0x1c, 0xc8, 0x50, 0x8b]);
+        assert_eq!(on.details, ["AirDrop receiving on"]);
+        assert_eq!(off.details, ["AirDrop receiving off"]);
+        assert_eq!(on.unverified, off.unverified);
     }
 
     #[test]
@@ -417,6 +436,7 @@ mod tests {
     fn truncated() {
         let m = parse(&[0x4c, 0x00, 0x10, 0x05, 0x1b]).unwrap();
         assert_eq!(m[0].hex, "1b");
-        assert_eq!(m[0].details, ["active", "primary iCloud device"]);
+        assert_eq!(m[0].details, ["AirDrop receiving off"]);
+        assert_eq!(m[0].unverified, ["active", "primary iCloud device"]);
     }
 }

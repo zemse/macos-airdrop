@@ -34,8 +34,10 @@ airdrop list
 #   images    AVCI, AVIF, HEIC, HEICS, HEIF
 #   photos    Live Photos v1, asset bundles v1
 #
-# hidden: 1 device with AirDrop on nearby (Bluetooth), may include the receivers above
-#    -45 dBm  8155E1DF-90EB-A4BB-E689-BDDC343B8DB5  iPhone, iPad, Mac or Watch
+# hidden: 2 devices with AirDrop on nearby (Bluetooth; Everyone or Contacts Only), may include the receivers above
+#    -41 dBm  577CBE08-21FA-4004-2B76-11E95C601C73  iPhone, iPad, Mac or Watch
+#    -42 dBm  1E6F1F87-EDB4-2940-FD76-6C48196470E4  iPhone, iPad, Mac or Watch
+#   so at least 1 device is likely hiding from you: 2 with AirDrop on, 1 receiver visible above
 
 # Send files, folders and links in one transfer
 airdrop send 571707478742 ./photo.jpg ./notes/ https://example.com
@@ -110,10 +112,13 @@ claude mcp add airdrop -- airdrop mcp
   because that is what makes `sharingd` bring up AWDL; without it sends stall.
 - `list` scans Bluetooth for the hidden section, so its first run asks for Bluetooth
   access for your terminal app. Hidden devices are the ones whose Continuity Nearby Info
-  says AirDrop receiving is on; they cannot be matched to receivers, so visible receivers
-  are counted there too. Continuity message labels come from
+  says AirDrop receiving is on. That bit only tells Receiving Off apart; it is the same for
+  Everyone and Contacts Only (verified by toggling an iPhone). Hidden devices cannot be
+  matched to receivers, so visible receivers are counted there too, and `list` reports
+  the surplus as likely hiding from you. Continuity message labels come from
   [furiousMAC](https://github.com/furiousMAC/continuity)'s iOS 13 era reverse engineering
-  and can be wrong on newer systems; the raw bytes are shown alongside.
+  and can be wrong on newer systems (a phone on a desk reads as "driving"), so labels not
+  confirmed on current devices are marked unverified and the raw bytes are shown alongside.
 - Feature flag names come from [OpenDrop](https://github.com/seemoo-lab/opendrop)'s
   reverse engineering; newer bits are shown as unknown.
 
