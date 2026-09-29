@@ -103,9 +103,13 @@ pub struct Scan {
     /// Everyone or Contacts Only, including Contacts Only receivers without us in their
     /// contacts. Cannot be matched to `peers`, so receivers listed there show up here too.
     pub hidden: Vec<ble::BleDevice>,
-    /// How many more devices have AirDrop on (per `hidden`) than there are receivers in
-    /// `peers`: at least this many are likely hiding from us.
+    /// How many more nearby devices (signal at least `min_rssi`) have AirDrop on, per
+    /// `hidden`, than there are receivers in `peers`: at least this many are likely hiding
+    /// from us.
     pub likely_hiding: usize,
+    /// The signal strength, in dBm, below which a `hidden` device counts as too far away to
+    /// reach over AirDrop and is left out of `likely_hiding`.
+    pub min_rssi: i32,
     /// Why the Bluetooth scan failed, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hidden_error: Option<String>,
@@ -444,7 +448,7 @@ fn identify(peers: &mut [Peer], timeout: Duration) {
 /// Browses for `wait`, then returns every other receiver still advertising, with the names
 /// they report, and the devices with AirDrop on that Bluetooth hears. `debug` also returns
 /// AWDL ping responders and every Bluetooth device.
-pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
+pub fn discover(wait: Duration, debug: bool, min_rssi: i32) -> Result<Scan, String> {
     let sharing = Sharing::get()?;
     let _activation = Activation::start(sharing);
     // Listens during the browse, while the run loop delivers its callbacks.
@@ -520,11 +524,13 @@ pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
         ),
         Some(Err(e)) => (Some(Vec::new()), Some(e)),
     };
-    let likely_hiding = hidden.len().saturating_sub(peers.len());
+    let near = hidden.iter().filter(|d| d.rssi >= min_rssi).count();
+    let likely_hiding = near.saturating_sub(peers.len());
     Ok(Scan {
         peers,
         hidden,
         likely_hiding,
+        min_rssi,
         hidden_error,
         awdl,
         awdl_error,

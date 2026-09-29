@@ -46,8 +46,9 @@ fn tools() -> Value {
                 hidden lists devices whose Bluetooth \
                 advertisements say AirDrop receiving is on (Everyone or Contacts Only; the \
                 bit only distinguishes Receiving Off); they cannot be matched to peers, so \
-                peers show up there too. likely_hiding = hidden count minus peers count: at \
-                least that many devices are likely Contacts Only without you as a contact. \
+                peers show up there too. likely_hiding = hidden devices at or above min_rssi \
+                minus peers count: at least that many are likely Contacts Only without you as \
+                a contact; weaker ones are likely just out of AirDrop range. \
                 Message fields under unverified come from old research and may be wrong. With debug, awdl lists anonymous Apple devices answering on AWDL \
                 and ble every Apple device heard over Bluetooth LE with decoded Continuity \
                 messages. This Mac is excluded. Empty peers means nobody is \
@@ -58,9 +59,15 @@ fn tools() -> Value {
                 "properties": {
                     "wait_secs": {
                         "type": "number",
-                        "description": "How long to browse. Default 5.",
+                        "description": "How long to browse. Default 8.",
                         "minimum": 1,
                         "maximum": 60
+                    },
+                    "min_rssi": {
+                        "type": "integer",
+                        "description": "Hidden devices weaker than this (dBm) count as out of AirDrop range and are left out of likely_hiding. Default -65.",
+                        "minimum": -100,
+                        "maximum": -20
                     },
                     "debug": {
                         "type": "boolean",
@@ -145,8 +152,11 @@ fn call_tool(params: &Value, notify: &mut dyn FnMut(Value)) -> Result<Value, (i6
     match name {
         "list_peers" => Ok(
             match discovery::discover(
-                secs(&args, "wait_secs", 5.0),
+                secs(&args, "wait_secs", 8.0),
                 args.get("debug").and_then(Value::as_bool).unwrap_or(false),
+                args.get("min_rssi")
+                    .and_then(Value::as_i64)
+                    .map_or(-65, |v| v.clamp(-100, -20) as i32),
             ) {
                 Ok(scan) => tool_result(json!(scan), false),
                 Err(e) => tool_error(e),

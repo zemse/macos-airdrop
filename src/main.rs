@@ -16,6 +16,10 @@ use serde_json::{Value, json};
 
 use send::{Event, Item, Outcome, Report};
 
+/// Devices in the same room measured -28 to -52 dBm and a device out of AirDrop range -71 to
+/// -82 dBm, so the default sits in the gap.
+const DEFAULT_MIN_RSSI: i32 = -65;
+
 const ABOUT: &str = "Send files and links over AirDrop from the terminal, with no UI.";
 
 const LONG_ABOUT: &str = "\
@@ -81,9 +85,10 @@ After the receivers it lists \"hidden\" devices: ones whose Bluetooth LE adverti
 (Continuity Nearby Info) say AirDrop receiving is on. That bit only means AirDrop is not
 Receiving Off; it is the same for Everyone and Contacts Only. Each line shows signal
 strength, the device's Bluetooth identifier and a guess at its kind. They cannot be
-matched to the receivers above, so those show up here too. When more devices have
-AirDrop on than there are receivers above, the difference is reported as likely hiding
-from you (Contacts Only without you as a contact). A device whose AirDrop is on but
+matched to the receivers above, so those show up here too. When more nearby devices
+(signal at least --min-rssi, default -65 dBm) have AirDrop on than there are receivers
+above, the difference is reported as likely hiding from you (Contacts Only without you
+as a contact); weaker ones are reported as likely out of AirDrop range. A device whose AirDrop is on but
 screen is off may not be reachable. The first run asks for Bluetooth access for your
 terminal app.
 
@@ -106,13 +111,13 @@ JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"airdropable\"
 \"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
 \"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
 \"live_photo_version\", \"asset_bundle_version\"}, \"discover_error\",
-\"raw\": {\"txt\", \"discover\"}}], \"likely_hiding\", \"hidden\": [{\"id\", \"name\", \"rssi\", \"kind\",
+\"raw\": {\"txt\", \"discover\"}}], \"likely_hiding\", \"min_rssi\", \"hidden\": [{\"id\", \"name\", \"rssi\", \"kind\",
 \"airdrop\", \"messages\": [{\"type\", \"name\", \"details\", \"unverified\", \"hex\"}]}], \"hidden_error\",
 \"awdl\": [{\"address\"}], \"awdl_error\", \"ble\": [same as hidden]}; awdl, awdl_error and
 ble only with --debug.")]
     List {
         /// Seconds to browse for.
-        #[arg(short, long, default_value_t = 5.0, value_name = "SECS")]
+        #[arg(short, long, default_value_t = 8.0, value_name = "SECS")]
         wait: f64,
         /// Print JSON instead of a table.
         #[arg(long)]
@@ -120,6 +125,9 @@ ble only with --debug.")]
         /// Also list every Apple device found over AWDL and Bluetooth LE.
         #[arg(long)]
         debug: bool,
+        /// Hidden devices weaker than this (dBm) count as out of AirDrop range.
+        #[arg(long, default_value_t = DEFAULT_MIN_RSSI, value_name = "DBM", allow_negative_numbers = true)]
+        min_rssi: i32,
     },
     /// Send files, folders or links to a receiver.
     #[command(long_about = "\
@@ -271,8 +279,8 @@ fn plural(n: usize, word: &str) -> String {
     }
 }
 
-fn list(wait: f64, as_json: bool, debug: bool) -> Result<ExitCode, String> {
-    let scan = discovery::discover(duration(wait)?, debug)?;
+fn list(wait: f64, as_json: bool, debug: bool, min_rssi: i32) -> Result<ExitCode, String> {
+    let scan = discovery::discover(duration(wait)?, debug, min_rssi)?;
     if as_json {
         println!("{}", json!(scan));
         return Ok(ExitCode::SUCCESS);
@@ -291,21 +299,38 @@ fn list(wait: f64, as_json: bool, debug: bool) -> Result<ExitCode, String> {
     if !scan.hidden.is_empty() {
         gap();
         println!(
-            "hidden: {} with AirDrop on nearby (Bluetooth; Everyone or Contacts Only), may include the receivers above",
+            "hidden: {} with AirDrop on (Bluetooth; Everyone or Contacts Only), may include the receivers above",
             plural(scan.hidden.len(), "device")
         );
         for d in &scan.hidden {
             print_ble_device(d, false);
         }
-        if scan.likely_hiding > 0 {
+        let near = scan
+            .hidden
+            .iter()
+            .filter(|d| d.rssi >= scan.min_rssi)
+            .count();
+        let far = scan.hidden.len() - near;
+        let mut summary = if scan.likely_hiding > 0 {
             let n = scan.likely_hiding;
             let devices = if n == 1 { "device is" } else { "devices are" };
-            println!(
-                "  so at least {n} {devices} likely hiding from you: {} with AirDrop on, {} visible above",
-                scan.hidden.len(),
+            format!(
+                "  so at least {n} {devices} likely hiding from you (Contacts Only without you as a contact): {near} nearby with AirDrop on, {} visible above",
                 plural(scan.peers.len(), "receiver")
+            )
+        } else {
+            format!(
+                "  none hiding from you: {near} nearby with AirDrop on, {} visible above",
+                plural(scan.peers.len(), "receiver")
+            )
+        };
+        if far > 0 {
+            summary += &format!(
+                "; {far} more below {} dBm, likely out of AirDrop range",
+                scan.min_rssi
             );
         }
+        println!("{summary}");
     }
     let awdl = scan.awdl.as_deref().unwrap_or_default();
     if !awdl.is_empty() {
@@ -451,7 +476,12 @@ fn send_cmd(
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::List { wait, json, debug } => list(wait, json, debug),
+        Command::List {
+            wait,
+            json,
+            debug,
+            min_rssi,
+        } => list(wait, json, debug, min_rssi),
         Command::Send {
             peer_id,
             items,
