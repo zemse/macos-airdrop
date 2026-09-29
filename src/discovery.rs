@@ -101,9 +101,11 @@ pub struct Scan {
     pub peers: Vec<Peer>,
     /// Apple devices answering on AWDL that do not offer AirDrop to us, e.g. Contacts Only
     /// receivers without us in their contacts. Also AirPlay, Sidecar or Universal Control
-    /// peers. Anonymous: link-local addresses are randomized.
-    pub hidden: Vec<Hidden>,
+    /// peers. Anonymous: link-local addresses are randomized. Only probed in debug mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<Vec<Hidden>>,
     /// Why the presence probe failed, when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hidden_error: Option<String>,
 }
 
@@ -427,8 +429,8 @@ fn identify(peers: &mut [Peer], timeout: Duration) {
 }
 
 /// Browses for `wait`, then returns every other receiver still advertising, with the names
-/// they report.
-pub fn discover(wait: Duration) -> Result<Scan, String> {
+/// they report. `debug` also looks for nearby devices that do not offer AirDrop to us.
+pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
     let sharing = Sharing::get()?;
     let _activation = Activation::start(sharing);
     let state = Box::new(RefCell::new(State::default()));
@@ -470,23 +472,28 @@ pub fn discover(wait: Duration) -> Result<Scan, String> {
     drop(st);
     // Still inside the activation, so AWDL stays up while the peers are asked.
     let neighbours = std::thread::scope(|scope| {
-        let probe = scope.spawn(|| presence::awdl_neighbours(Duration::from_millis(1500)));
+        let probe =
+            debug.then(|| scope.spawn(|| presence::awdl_neighbours(Duration::from_millis(1500))));
         identify(&mut peers, Duration::from_secs(4));
-        probe
-            .join()
-            .unwrap_or_else(|_| Err("presence probe panicked".into()))
+        probe.map(|p| {
+            p.join()
+                .unwrap_or_else(|_| Err("presence probe panicked".into()))
+        })
     });
     let seen: Vec<&String> = peers.iter().flat_map(|p| &p.network.addresses).collect();
     let (hidden, hidden_error) = match neighbours {
-        Ok(found) => (
-            found
-                .into_iter()
-                .filter(|a| !local.contains(a) && !seen.contains(&a))
-                .map(|address| Hidden { address })
-                .collect(),
+        None => (None, None),
+        Some(Ok(found)) => (
+            Some(
+                found
+                    .into_iter()
+                    .filter(|a| !local.contains(a) && !seen.contains(&a))
+                    .map(|address| Hidden { address })
+                    .collect(),
+            ),
             None,
         ),
-        Err(e) => (Vec::new(), Some(e)),
+        Some(Err(e)) => (Some(Vec::new()), Some(e)),
     };
     Ok(Scan {
         peers,

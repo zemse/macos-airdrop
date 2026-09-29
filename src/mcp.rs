@@ -43,9 +43,9 @@ fn tools() -> Value {
                 mode is everyone or contacts_only; a contacts_only receiver answers without \
                 a name or features and is only visible if it likely has you as a contact. \
                 discover_error is set when the receiver did not answer. \
-                hidden lists anonymous Apple devices answering on AWDL that do not offer \
-                AirDrop to you (e.g. Contacts Only receivers without you as a contact; also \
-                AirPlay/Sidecar peers). This Mac is excluded. Empty peers means nobody is \
+                With debug, hidden lists anonymous Apple devices answering on AWDL that do \
+                not offer AirDrop to you (e.g. Contacts Only receivers without you as a \
+                contact; also AirPlay/Sidecar peers). This Mac is excluded. Empty peers means nobody is \
                 discoverable to you: the \
                 receiver's screen may be off, or AirDrop set to Receiving Off.",
             "inputSchema": {
@@ -56,6 +56,10 @@ fn tools() -> Value {
                         "description": "How long to browse. Default 5.",
                         "minimum": 1,
                         "maximum": 60
+                    },
+                    "debug": {
+                        "type": "boolean",
+                        "description": "Also list nearby devices that do not offer AirDrop to you. Default false."
                     }
                 },
                 "additionalProperties": false
@@ -134,10 +138,15 @@ fn call_tool(params: &Value, notify: &mut dyn FnMut(Value)) -> Result<Value, (i6
         .cloned()
         .unwrap_or_else(|| json!({}));
     match name {
-        "list_peers" => Ok(match discovery::discover(secs(&args, "wait_secs", 5.0)) {
-            Ok(scan) => tool_result(json!(scan), false),
-            Err(e) => tool_error(e),
-        }),
+        "list_peers" => Ok(
+            match discovery::discover(
+                secs(&args, "wait_secs", 5.0),
+                args.get("debug").and_then(Value::as_bool).unwrap_or(false),
+            ) {
+                Ok(scan) => tool_result(json!(scan), false),
+                Err(e) => tool_error(e),
+            },
+        ),
         "send" => {
             let Some(peer_id) = args.get("peer_id").and_then(Value::as_str) else {
                 return Ok(tool_error("missing peer_id".into()));

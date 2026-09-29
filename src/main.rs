@@ -76,7 +76,7 @@ does (AirDrop /Discover). This Mac is left out. For each receiver it prints:
   video, hdr, images, photos
                 media the receiver can handle (HEVC, ProRes, Dolby Vision, HEIC, ...)
 
-After the receivers it lists \"nearby but hidden\" devices: Apple devices answering an
+With --debug it then lists \"nearby but hidden\" devices: Apple devices answering an
 IPv6 ping on AWDL that do not offer AirDrop to you, such as Contacts Only receivers
 without you in their contacts. They are anonymous (random link-local addresses), and
 AWDL is also used by AirPlay, Sidecar and Universal Control, so not every one is an
@@ -86,7 +86,7 @@ A receiver's ID and host change when it switches AirDrop mode. An empty list
 means nobody is discoverable: the receiver's screen may be off, or its AirDrop set to
 Receiving Off.
 
-JSON output (--json): {\"hidden\": [{\"address\"}], \"hidden_error\", \"peers\": [{\"id\", \"name\", \"model\", \"airdropable\", \"mode\",
+JSON output (--json): {\"hidden\": [{\"address\"}] (--debug only), \"hidden_error\", \"peers\": [{\"id\", \"name\", \"model\", \"airdropable\", \"mode\",
 \"network\": {\"interfaces\", \"addresses\", \"host\", \"port\", \"responded_via\",
 \"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
 \"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
@@ -99,6 +99,9 @@ JSON output (--json): {\"hidden\": [{\"address\"}], \"hidden_error\", \"peers\":
         /// Print JSON instead of a table.
         #[arg(long)]
         json: bool,
+        /// Also list nearby Apple devices that do not offer AirDrop to you.
+        #[arg(long)]
+        debug: bool,
     },
     /// Send files, folders or links to a receiver.
     #[command(long_about = "\
@@ -213,8 +216,8 @@ fn print_peer(p: &discovery::Peer) {
     }
 }
 
-fn list(wait: f64, as_json: bool) -> Result<ExitCode, String> {
-    let scan = discovery::discover(duration(wait)?)?;
+fn list(wait: f64, as_json: bool, debug: bool) -> Result<ExitCode, String> {
+    let scan = discovery::discover(duration(wait)?, debug)?;
     if as_json {
         println!("{}", json!(scan));
         return Ok(ExitCode::SUCCESS);
@@ -225,20 +228,21 @@ fn list(wait: f64, as_json: bool) -> Result<ExitCode, String> {
         }
         print_peer(p);
     }
-    if !scan.hidden.is_empty() {
+    let hidden = scan.hidden.as_deref().unwrap_or_default();
+    if !hidden.is_empty() {
         if !scan.peers.is_empty() {
             println!();
         }
-        let n = scan.hidden.len();
+        let n = hidden.len();
         let s = if n == 1 { "" } else { "s" };
         println!(
             "nearby but hidden: {n} more Apple device{s} on AWDL, not offering AirDrop to you"
         );
-        for h in &scan.hidden {
+        for h in hidden {
             println!("  {}", h.address);
         }
     }
-    if scan.peers.is_empty() && scan.hidden.is_empty() {
+    if scan.peers.is_empty() && hidden.is_empty() {
         eprintln!(
             "no AirDrop receivers found in {wait}s (is the receiver awake, nearby, and set to Everyone?)"
         );
@@ -357,7 +361,7 @@ fn send_cmd(
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::List { wait, json } => list(wait, json),
+        Command::List { wait, json, debug } => list(wait, json, debug),
         Command::Send {
             peer_id,
             items,
