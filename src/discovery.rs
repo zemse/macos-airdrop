@@ -99,25 +99,28 @@ const SERVICE_TYPE: &CStr = c"_airdrop._tcp";
 #[derive(Debug, Clone, Serialize)]
 pub struct Scan {
     pub peers: Vec<Peer>,
-    /// Apple devices answering on AWDL that do not offer AirDrop to us, e.g. Contacts Only
-    /// receivers without us in their contacts. Also AirPlay, Sidecar or Universal Control
-    /// peers. Anonymous: link-local addresses are randomized. Only probed in debug mode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hidden: Option<Vec<Hidden>>,
-    /// Why the presence probe failed, when it did.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hidden_error: Option<String>,
-    /// Apple devices heard advertising over Bluetooth LE, nearest first. Only scanned in
-    /// debug mode.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ble: Option<Vec<ble::BleDevice>>,
+    /// Devices advertising AirDrop receiving on over Bluetooth LE, nearest first, e.g.
+    /// Contacts Only receivers without us in their contacts. Cannot be matched to `peers`,
+    /// so receivers listed there show up here too.
+    pub hidden: Vec<ble::BleDevice>,
     /// Why the Bluetooth scan failed, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ble_error: Option<String>,
+    pub hidden_error: Option<String>,
+    /// Apple devices answering on AWDL that are not in `peers`: Contacts Only receivers
+    /// without us in their contacts, and AirPlay, Sidecar or Universal Control peers.
+    /// Anonymous: link-local addresses are randomized. Only probed in debug mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub awdl: Option<Vec<AwdlDevice>>,
+    /// Why the AWDL probe failed, when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub awdl_error: Option<String>,
+    /// Every Apple device heard over Bluetooth LE, nearest first. Only in debug mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ble: Option<Vec<ble::BleDevice>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct Hidden {
+pub struct AwdlDevice {
     pub address: String,
 }
 
@@ -436,12 +439,13 @@ fn identify(peers: &mut [Peer], timeout: Duration) {
 }
 
 /// Browses for `wait`, then returns every other receiver still advertising, with the names
-/// they report. `debug` also looks for nearby devices that do not offer AirDrop to us.
+/// they report, and the devices with AirDrop on that Bluetooth hears. `debug` also returns
+/// AWDL ping responders and every Bluetooth device.
 pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
     let sharing = Sharing::get()?;
     let _activation = Activation::start(sharing);
     // Listens during the browse, while the run loop delivers its callbacks.
-    let ble_scan = debug.then(ble::Scan::start);
+    let ble_scan = ble::Scan::start();
     let state = Box::new(RefCell::new(State::default()));
     let ctx = &*state as *const RefCell<State> as *mut c_void;
     let mut browse: DNSServiceRef = std::ptr::null_mut();
@@ -466,11 +470,15 @@ pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, wait.as_secs_f64(), 0);
         DNSServiceRefDeallocate(browse);
     }
-    let (ble, ble_error) = match ble_scan.map(|s| s.and_then(ble::Scan::finish)) {
-        None => (None, None),
-        Some(Ok(devices)) => (Some(devices), None),
-        Some(Err(e)) => (Some(Vec::new()), Some(e)),
+    let (ble, hidden_error) = match ble_scan.and_then(ble::Scan::finish) {
+        Ok(devices) => (devices, None),
+        Err(e) => (Vec::new(), Some(e)),
     };
+    let hidden = ble
+        .iter()
+        .filter(|d| d.airdrop == Some(true))
+        .cloned()
+        .collect();
     let mut st = state.borrow_mut();
     for sd in st.resolving.drain(..) {
         unsafe { DNSServiceRefDeallocate(sd) };
@@ -495,14 +503,14 @@ pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
         })
     });
     let seen: Vec<&String> = peers.iter().flat_map(|p| &p.network.addresses).collect();
-    let (hidden, hidden_error) = match neighbours {
+    let (awdl, awdl_error) = match neighbours {
         None => (None, None),
         Some(Ok(found)) => (
             Some(
                 found
                     .into_iter()
                     .filter(|a| !local.contains(a) && !seen.contains(&a))
-                    .map(|address| Hidden { address })
+                    .map(|address| AwdlDevice { address })
                     .collect(),
             ),
             None,
@@ -513,8 +521,9 @@ pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
         peers,
         hidden,
         hidden_error,
-        ble,
-        ble_error,
+        awdl,
+        awdl_error,
+        ble: debug.then_some(ble),
     })
 }
 

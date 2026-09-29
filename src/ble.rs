@@ -36,6 +36,9 @@ pub struct BleDevice {
     pub rssi: i32,
     /// Best guess at what the device is, from the message types it sends.
     pub kind: Option<&'static str>,
+    /// The Nearby Info "AirDrop receiving" bit: set unless AirDrop is Receiving Off. `None`
+    /// when the device sent no Nearby Info.
+    pub airdrop: Option<bool>,
     /// Latest message of each type.
     pub messages: Vec<Message>,
 }
@@ -49,6 +52,8 @@ pub struct Message {
     /// Decoded fields, as short phrases.
     pub details: Vec<String>,
     pub hex: String,
+    #[serde(skip)]
+    pub payload: Vec<u8>,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -164,6 +169,7 @@ impl Message {
             name: type_name(kind),
             details,
             hex: hex(payload),
+            payload: payload.to_vec(),
         }
     }
 }
@@ -201,6 +207,13 @@ fn kind_of(messages: &[Message]) -> Option<&'static str> {
     } else {
         return None;
     })
+}
+
+fn nearby_info(messages: &[Message]) -> Option<&[u8]> {
+    messages
+        .iter()
+        .find(|m| m.kind == 0x10)
+        .map(|m| m.payload.as_slice())
 }
 
 #[derive(Default)]
@@ -264,6 +277,7 @@ define_class!(
                 name: None,
                 rssi: i32::MIN,
                 kind: None,
+                airdrop: None,
                 messages: Vec::new(),
             });
             if name.is_some() {
@@ -280,6 +294,9 @@ define_class!(
             }
             device.messages.sort_by_key(|m| m.kind);
             device.kind = kind_of(&device.messages);
+            device.airdrop = nearby_info(&device.messages)
+                .and_then(<[u8]>::first)
+                .map(|status| status & 0x40 != 0);
         }
     }
 );
@@ -330,6 +347,16 @@ impl Scan {
         }
         let mut devices: Vec<BleDevice> = ivars.devices.take().into_values().collect();
         devices.sort_by_key(|d| std::cmp::Reverse(d.rssi));
+        // A device that rotates its address mid-scan shows up twice with the same Nearby Info.
+        let mut seen: Vec<Vec<u8>> = Vec::new();
+        devices.retain(|d| match nearby_info(&d.messages) {
+            Some(p) if seen.iter().any(|s| s == p) => false,
+            Some(p) => {
+                seen.push(p.to_vec());
+                true
+            }
+            None => true,
+        });
         Ok(devices)
     }
 }

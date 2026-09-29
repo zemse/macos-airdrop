@@ -33,6 +33,9 @@ airdrop list
 #   hdr       HDR; Dolby Vision profiles 05, 08
 #   images    AVCI, AVIF, HEIC, HEICS, HEIF
 #   photos    Live Photos v1, asset bundles v1
+#
+# hidden: 1 device with AirDrop on nearby (Bluetooth), may include the receivers above
+#    -45 dBm  8155E1DF-90EB-A4BB-E689-BDDC343B8DB5  iPhone, iPad, Mac or Watch
 
 # Send files, folders and links in one transfer
 airdrop send 571707478742 ./photo.jpg ./notes/ https://example.com
@@ -41,8 +44,8 @@ airdrop send 571707478742 ./photo.jpg ./notes/ https://example.com
 # transferring…
 # sent 3 items to Office-Mac (MacBook Air)
 
-# Also list nearby Apple devices that do not offer AirDrop to you: AWDL ping
-# responders, and Bluetooth LE (Continuity) advertisers with decoded state
+# Also list every AWDL ping responder and Bluetooth LE (Continuity) advertiser,
+# with decoded state
 airdrop list --debug
 
 # Machine-readable output
@@ -67,7 +70,7 @@ airdrop send 571707478742 report.pdf --json --timeout 60
 `airdrop mcp` serves the Model Context Protocol over stdio with two tools:
 
 - **`list_peers`** `{wait_secs?, debug?}` returns nearby receivers (and with `debug`,
-  the AWDL and Bluetooth devices `list --debug` shows).
+  the AWDL and Bluetooth devices `list --debug` adds).
 - **`send`** `{peer_id, items, timeout_secs?}` sends absolute paths or URLs and returns the
   outcome, receiver name and model. When the client passes a progress token it emits
   `notifications/progress` with bytes sent and total.
@@ -105,8 +108,10 @@ claude mcp add airdrop -- airdrop mcp
   Bonjour (`_airdrop._tcp`, including AWDL) and sends `/Discover` itself over a socket
   opted into peer-to-peer interfaces (`SO_RECV_ANYIF`). It still opens an `SFBrowser`,
   because that is what makes `sharingd` bring up AWDL; without it sends stall.
-- `list --debug` scans Bluetooth, so its first run asks for Bluetooth access for your
-  terminal app. Continuity message labels come from
+- `list` scans Bluetooth for the hidden section, so its first run asks for Bluetooth
+  access for your terminal app. Hidden devices are the ones whose Continuity Nearby Info
+  says AirDrop receiving is on; they cannot be matched to receivers, so visible receivers
+  are counted there too. Continuity message labels come from
   [furiousMAC](https://github.com/furiousMAC/continuity)'s iOS 13 era reverse engineering
   and can be wrong on newer systems; the raw bytes are shown alongside.
 - Feature flag names come from [OpenDrop](https://github.com/seemoo-lab/opendrop)'s
