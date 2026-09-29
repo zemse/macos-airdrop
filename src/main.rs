@@ -44,6 +44,19 @@ Exit codes:
   3  send was declined or canceled
   4  send timed out (the operation was canceled)";
 
+#[cfg(test)]
+mod tests {
+    use super::human_bytes;
+
+    #[test]
+    fn bytes() {
+        assert_eq!(human_bytes(512), "512 B");
+        assert_eq!(human_bytes(1_500), "1.5 KB");
+        assert_eq!(human_bytes(302_083_218), "302.1 MB");
+        assert_eq!(human_bytes(4_500_000_000), "4.5 GB");
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "airdrop", version, about = ABOUT, long_about = LONG_ABOUT, after_help = EXIT_CODES)]
 struct Cli {
@@ -221,8 +234,18 @@ fn list(wait: f64, as_json: bool) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn megabytes(bytes: u64) -> String {
-    format!("{:.1} MB", bytes as f64 / 1e6)
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1000 {
+        return format!("{bytes} B");
+    }
+    let mut v = bytes as f64 / 1000.0;
+    let mut unit = 0;
+    while v >= 1000.0 && unit < UNITS.len() - 1 {
+        v /= 1000.0;
+        unit += 1;
+    }
+    format!("{v:.1} {}", UNITS[unit])
 }
 
 /// Prints one human progress line per meaningful event.
@@ -244,8 +267,8 @@ fn progress_line(ev: &Event, last_pct: &mut Option<u64>) -> Option<String> {
             };
             Some(format!(
                 "{pct:>3}%  {} of {}{left}",
-                megabytes(p.bytes),
-                megabytes(p.total)
+                human_bytes(p.bytes),
+                human_bytes(p.total)
             ))
         }
         _ => None,
