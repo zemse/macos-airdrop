@@ -1,3 +1,4 @@
+mod ble;
 mod caps;
 mod cf;
 mod discovery;
@@ -82,6 +83,14 @@ without you in their contacts. They are anonymous (random link-local addresses),
 AWDL is also used by AirPlay, Sidecar and Universal Control, so not every one is an
 AirDrop receiver.
 
+--debug also listens to Bluetooth LE for the advertisements Apple devices send
+unprompted (Continuity), and lists every Apple device heard, nearest first: signal
+strength, a guess at the kind of device, and each message decoded where the format is
+known (nearby info: locked, active, driving, AirDrop receiving and Wi-Fi state;
+AirPods model and battery; Find My status). The labels come from reverse engineering
+done on iOS 13 and can be wrong on newer systems, so the raw bytes follow in brackets.
+The first run asks for Bluetooth access for your terminal app. These devices cannot be matched to AWDL addresses or receivers.
+
 A receiver's ID and host change when it switches AirDrop mode. An empty list
 means nobody is discoverable: the receiver's screen may be off, or its AirDrop set to
 Receiving Off.
@@ -91,7 +100,8 @@ JSON output (--json): {\"hidden\": [{\"address\"}] (--debug only), \"hidden_erro
 \"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
 \"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
 \"live_photo_version\", \"asset_bundle_version\"}, \"discover_error\",
-\"raw\": {\"txt\", \"discover\"}}]}")]
+\"raw\": {\"txt\", \"discover\"}}], \"ble\": [{\"id\", \"name\", \"rssi\", \"kind\",
+\"messages\": [{\"type\", \"name\", \"details\", \"hex\"}]}] (--debug only), \"ble_error\"}")]
     List {
         /// Seconds to browse for.
         #[arg(short, long, default_value_t = 5.0, value_name = "SECS")]
@@ -99,7 +109,7 @@ JSON output (--json): {\"hidden\": [{\"address\"}] (--debug only), \"hidden_erro
         /// Print JSON instead of a table.
         #[arg(long)]
         json: bool,
-        /// Also list nearby Apple devices that do not offer AirDrop to you.
+        /// Also list nearby Apple devices found over AWDL and Bluetooth LE.
         #[arg(long)]
         debug: bool,
     },
@@ -216,6 +226,29 @@ fn print_peer(p: &discovery::Peer) {
     }
 }
 
+/// Prints a device heading, then one line per message.
+fn print_ble_device(d: &ble::BleDevice) {
+    let mut head = format!("  {:>4} dBm  {}", d.rssi, d.id);
+    if let Some(k) = d.kind {
+        head += &format!("  {k}");
+    }
+    if let Some(n) = &d.name {
+        head += &format!("  \"{n}\"");
+    }
+    println!("{head}");
+    for m in &d.messages {
+        let name = m
+            .name
+            .map_or_else(|| format!("type {:#04x}", m.kind), str::to_owned);
+        let mut line = format!("    {name:<18} ");
+        if !m.details.is_empty() {
+            line += &format!("{}  ", m.details.join(", "));
+        }
+        line += &format!("[{}]", m.hex);
+        println!("{line}");
+    }
+}
+
 fn list(wait: f64, as_json: bool, debug: bool) -> Result<ExitCode, String> {
     let scan = discovery::discover(duration(wait)?, debug)?;
     if as_json {
@@ -242,13 +275,28 @@ fn list(wait: f64, as_json: bool, debug: bool) -> Result<ExitCode, String> {
             println!("  {}", h.address);
         }
     }
-    if scan.peers.is_empty() && hidden.is_empty() {
+    let ble = scan.ble.as_deref().unwrap_or_default();
+    if !ble.is_empty() {
+        if !scan.peers.is_empty() || !hidden.is_empty() {
+            println!();
+        }
+        let n = ble.len();
+        let s = if n == 1 { "" } else { "s" };
+        println!("Bluetooth: {n} Apple device{s} advertising");
+        for d in ble {
+            print_ble_device(d);
+        }
+    }
+    if scan.peers.is_empty() && hidden.is_empty() && ble.is_empty() {
         eprintln!(
             "no AirDrop receivers found in {wait}s (is the receiver awake, nearby, and set to Everyone?)"
         );
     }
     if let Some(e) = &scan.hidden_error {
         eprintln!("note: could not check for hidden devices: {e}");
+    }
+    if let Some(e) = &scan.ble_error {
+        eprintln!("note: could not scan Bluetooth: {e}");
     }
     Ok(ExitCode::SUCCESS)
 }

@@ -45,7 +45,9 @@ fn tools() -> Value {
                 discover_error is set when the receiver did not answer. \
                 With debug, hidden lists anonymous Apple devices answering on AWDL that do \
                 not offer AirDrop to you (e.g. Contacts Only receivers without you as a \
-                contact; also AirPlay/Sidecar peers). This Mac is excluded. Empty peers means nobody is \
+                contact; also AirPlay/Sidecar peers), and ble lists Apple devices heard \
+                over Bluetooth LE with decoded Continuity messages (activity, AirDrop \
+                receiving, AirPods battery, Find My). This Mac is excluded. Empty peers means nobody is \
                 discoverable to you: the \
                 receiver's screen may be off, or AirDrop set to Receiving Off.",
             "inputSchema": {
@@ -59,7 +61,7 @@ fn tools() -> Value {
                     },
                     "debug": {
                         "type": "boolean",
-                        "description": "Also list nearby devices that do not offer AirDrop to you. Default false."
+                        "description": "Also list nearby Apple devices found over AWDL and Bluetooth LE. Default false."
                     }
                 },
                 "additionalProperties": false

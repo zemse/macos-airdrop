@@ -41,6 +41,10 @@ airdrop send 571707478742 ./photo.jpg ./notes/ https://example.com
 # transferring…
 # sent 3 items to Office-Mac (MacBook Air)
 
+# Also list nearby Apple devices that do not offer AirDrop to you: AWDL ping
+# responders, and Bluetooth LE (Continuity) advertisers with decoded state
+airdrop list --debug
+
 # Machine-readable output
 airdrop list --json
 airdrop send 571707478742 report.pdf --json --timeout 60
@@ -62,7 +66,8 @@ airdrop send 571707478742 report.pdf --json --timeout 60
 
 `airdrop mcp` serves the Model Context Protocol over stdio with two tools:
 
-- **`list_peers`** `{wait_secs?}` returns nearby receivers.
+- **`list_peers`** `{wait_secs?, debug?}` returns nearby receivers (and with `debug`,
+  the AWDL and Bluetooth devices `list --debug` shows).
 - **`send`** `{peer_id, items, timeout_secs?}` sends absolute paths or URLs and returns the
   outcome, receiver name and model. When the client passes a progress token it emits
   `notifications/progress` with bytes sent and total.
@@ -100,6 +105,10 @@ claude mcp add airdrop -- airdrop mcp
   Bonjour (`_airdrop._tcp`, including AWDL) and sends `/Discover` itself over a socket
   opted into peer-to-peer interfaces (`SO_RECV_ANYIF`). It still opens an `SFBrowser`,
   because that is what makes `sharingd` bring up AWDL; without it sends stall.
+- `list --debug` scans Bluetooth, so its first run asks for Bluetooth access for your
+  terminal app. Continuity message labels come from
+  [furiousMAC](https://github.com/furiousMAC/continuity)'s iOS 13 era reverse engineering
+  and can be wrong on newer systems; the raw bytes are shown alongside.
 - Feature flag names come from [OpenDrop](https://github.com/seemoo-lab/opendrop)'s
   reverse engineering; newer bits are shown as unknown.
 

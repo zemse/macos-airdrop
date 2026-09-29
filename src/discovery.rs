@@ -9,8 +9,8 @@ use core_foundation::runloop::{CFRunLoopRunInMode, kCFRunLoopDefaultMode};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::ble;
 use crate::caps::{Features, Media};
-
 use crate::presence;
 use crate::probe;
 use crate::sharing::{Activation, Sharing, main_queue};
@@ -107,6 +107,13 @@ pub struct Scan {
     /// Why the presence probe failed, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hidden_error: Option<String>,
+    /// Apple devices heard advertising over Bluetooth LE, nearest first. Only scanned in
+    /// debug mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ble: Option<Vec<ble::BleDevice>>,
+    /// Why the Bluetooth scan failed, when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ble_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -433,6 +440,8 @@ fn identify(peers: &mut [Peer], timeout: Duration) {
 pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
     let sharing = Sharing::get()?;
     let _activation = Activation::start(sharing);
+    // Listens during the browse, while the run loop delivers its callbacks.
+    let ble_scan = debug.then(ble::Scan::start);
     let state = Box::new(RefCell::new(State::default()));
     let ctx = &*state as *const RefCell<State> as *mut c_void;
     let mut browse: DNSServiceRef = std::ptr::null_mut();
@@ -457,6 +466,11 @@ pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, wait.as_secs_f64(), 0);
         DNSServiceRefDeallocate(browse);
     }
+    let (ble, ble_error) = match ble_scan.map(|s| s.and_then(ble::Scan::finish)) {
+        None => (None, None),
+        Some(Ok(devices)) => (Some(devices), None),
+        Some(Err(e)) => (Some(Vec::new()), Some(e)),
+    };
     let mut st = state.borrow_mut();
     for sd in st.resolving.drain(..) {
         unsafe { DNSServiceRefDeallocate(sd) };
@@ -499,6 +513,8 @@ pub fn discover(wait: Duration, debug: bool) -> Result<Scan, String> {
         peers,
         hidden,
         hidden_error,
+        ble,
+        ble_error,
     })
 }
 

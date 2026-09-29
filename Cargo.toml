@@ -21,6 +21,9 @@ clap = { version = "4.6.7", features = ["derive"] }
 core-foundation = "0.10.1"
 core-foundation-sys = "0.8.7"
 native-tls = "0.2.18"
+objc2 = "0.6.4"
+objc2-core-bluetooth = { version = "0.3.2", default-features = false, features = ["std", "CBCentralManager", "CBManager", "CBPeripheral", "CBPeer", "CBAdvertisementData", "CBCentralManagerConstants", "CBUUID"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSData", "NSDictionary", "NSValue", "NSUUID", "NSObject", "NSArray"] }
 plist = "1.10.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
