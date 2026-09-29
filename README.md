@@ -23,8 +23,9 @@ cargo install macos-airdrop   # or: cargo install --path .
 ```sh
 # Find nearby receivers (browses for 5s by default)
 airdrop list
-# Office-Mac  [accepts AirDrop from you]
+# Office-Mac
 #   id        571707478742
+#   airdrop   available
 #   network   awdl0  fe80::b855:9dff:fec0:8be6%awdl0  (63 ms)
 #   host      63649ac8-04a4-4bbc-9303-251909ab89c5.local:8770
 #   features  0x1b3fb  links, DVZIP archives, mixed item types, iris, discover, asset bundles  (+unknown bits 0x1b130)
@@ -74,7 +75,8 @@ claude mcp add airdrop -- airdrop mcp
 
 - **Receivers are identified by opaque Bonjour IDs.** `list` also asks each one for its
   name and capabilities with AirDrop's `/Discover` request, as Finder does. Receivers
-  set to *Contacts Only* may not answer and then show no name.
+  set to *Contacts Only* answer but withhold their name and feature flags, and their ID
+  changes whenever they switch AirDrop mode.
 - **IDs can change** when the receiver restarts AirDrop. List again if a send times out
   in `connecting`.
 - **The receiver must be awake and nearby**, with AirDrop set to *Everyone* (or

@@ -103,8 +103,9 @@ pub struct Peer {
     pub name: Option<String>,
     /// Model name, when the receiver includes it in its reply.
     pub model: Option<String>,
-    /// Whether the receiver would accept a transfer from this Mac right now.
-    pub accepts: Option<bool>,
+    /// The receiver's `IsAirDropable` reply. It was true in both Everyone and Contacts Only
+    /// modes, including from strangers, so it does not mean the receiver accepts from you.
+    pub airdropable: Option<bool>,
     pub network: Network,
     /// Decoded TXT `flags`.
     pub features: Option<Features>,
@@ -208,7 +209,7 @@ extern "C" fn on_browse(
         id,
         name: None,
         model: None,
-        accepts: None,
+        airdropable: None,
         network: Network::default(),
         features: None,
         media: None,
@@ -373,7 +374,7 @@ fn identify(peers: &mut [Peer], timeout: Duration) {
                         let text = |k: &str| r.reply[k].as_str().map(str::to_owned);
                         peer.name = text("ReceiverComputerName");
                         peer.model = text("ReceiverModelName");
-                        peer.accepts = r.reply["IsAirDropable"].as_bool();
+                        peer.airdropable = r.reply["IsAirDropable"].as_bool();
                         let caps = &r.reply["ReceiverMediaCapabilities"];
                         peer.media = caps.is_object().then(|| Media::parse(caps));
                         peer.network.responded_via = Some(r.via);

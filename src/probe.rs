@@ -93,7 +93,9 @@ fn connect(addr: &SocketAddr, timeout: Duration) -> std::io::Result<std::net::Tc
 fn read_response(r: &mut impl BufRead) -> Result<(u16, Vec<u8>), String> {
     let mut line = String::new();
     let io = |e: std::io::Error| e.to_string();
-    r.read_line(&mut line).map_err(io)?;
+    if r.read_line(&mut line).map_err(io)? == 0 {
+        return Err("closed the connection without replying".into());
+    }
     let status = line
         .split_whitespace()
         .nth(1)

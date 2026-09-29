@@ -60,8 +60,10 @@ List nearby AirDrop receivers.
 Browses Bonjour for `--wait` seconds, then asks each receiver about itself the way Finder
 does (AirDrop /Discover). This Mac is left out. For each receiver it prints:
 
-  name, model   device name (and model, when the receiver sends one)
-  accepts       whether it would accept a transfer from you right now
+  name, model   device name (and model, when the receiver sends one). Receivers set to
+                Contacts Only answer but withhold their name and TXT flags.
+  airdrop       the receiver's IsAirDropable reply (true even for Contacts Only
+                receivers that may decline you)
   id            what `send` takes
   network       interfaces (awdl0 = peer-to-peer Wi-Fi, en0 = shared network), the
                 address that answered and its response time
@@ -69,11 +71,11 @@ does (AirDrop /Discover). This Mac is left out. For each receiver it prints:
   video, hdr, images, photos
                 media the receiver can handle (HEVC, ProRes, Dolby Vision, HEIC, ...)
 
-A receiver set to Contacts Only may not answer, and then shows no name. An empty list
+A receiver's ID and host change when it switches AirDrop mode. An empty list
 means nobody is discoverable: the receiver's screen may be off, or its AirDrop set to
 Receiving Off.
 
-JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"accepts\",
+JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"airdropable\",
 \"network\": {\"interfaces\", \"addresses\", \"host\", \"port\", \"responded_via\",
 \"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
 \"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
@@ -138,19 +140,21 @@ fn duration(secs: f64) -> Result<Duration, String> {
 
 /// Prints one block per receiver: a heading, then labelled detail lines.
 fn print_peer(p: &discovery::Peer) {
-    let name = p.name.as_deref().unwrap_or("(name unknown)");
-    let heading = match &p.model {
-        Some(m) => format!("{name} ({m})"),
-        None => name.to_owned(),
+    let name = match (&p.name, &p.raw.discover) {
+        (Some(n), _) => n.as_str(),
+        // Contacts Only receivers answer but withhold their name.
+        (None, Some(_)) => "(name hidden: Contacts Only)",
+        (None, None) => "(no reply)",
     };
-    let accepts = match p.accepts {
-        Some(true) => "accepts AirDrop from you",
-        Some(false) => "not accepting from you",
-        None => "did not answer",
-    };
-    println!("{heading}  [{accepts}]");
+    match &p.model {
+        Some(m) => println!("{name} ({m})"),
+        None => println!("{name}"),
+    }
     let line = |label: &str, value: &str| println!("  {label:<9} {value}");
     line("id", &p.id);
+    if let Some(a) = p.airdropable {
+        line("airdrop", if a { "available" } else { "unavailable" });
+    }
     let net = &p.network;
     let mut via = net.interfaces.join(",");
     if let Some(addr) = net.responded_via.as_ref().or(net.addresses.first()) {
