@@ -42,7 +42,10 @@ fn tools() -> Value {
                 Dolby Vision, image formats) and raw (TXT record and full /Discover reply). \
                 mode is everyone or contacts_only; a contacts_only receiver answers without \
                 a name or features and is only visible if it likely has you as a contact. \
-                discover_error is set when the receiver did not answer. \
+                discover_error is set when the receiver did not answer. known is the name \
+                remembered from an earlier list (in ~/.airdrop/known.json) for a receiver that \
+                withheld it, with matched_by (id, host or address) and named_at (Unix \
+                seconds); a strong hint, not proof. \
                 hidden lists devices whose Bluetooth \
                 advertisements say AirDrop receiving is on (Everyone or Contacts Only; the \
                 bit only distinguishes Receiving Off); they cannot be matched to peers, so \

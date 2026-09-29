@@ -46,6 +46,11 @@ airdrop send 571707478742 ./photo.jpg ./notes/ https://example.com
 # transferring…
 # sent 3 items to Office-Mac (MacBook Air)
 
+# Name a Contacts Only receiver by hand (names of receivers seen in Everyone mode are
+# remembered automatically); list then shows "Office-Mac (remembered; Contacts Only ...)"
+airdrop name 448b59406f6b Office-Mac
+airdrop forget Office-Mac
+
 # Also list every AWDL ping responder and Bluetooth LE (Continuity) advertiser,
 # with decoded state
 airdrop list --debug
@@ -92,6 +97,12 @@ claude mcp add airdrop -- airdrop mcp
   receiver opens its AirDrop service only when one matches its contacts. So a hidden-name
   receiver in `list` likely has you saved (2-byte hashes can collide), and one that does
   not have you does not appear at all.
+- **Names are remembered.** `list` saves every name a receiver reports, with its ID, host
+  and link-local addresses, in `~/.airdrop/known.json`. A receiver that switches to
+  Contacts Only gets a new ID and host, but its AWDL address stayed the same across mode
+  switches in testing, so `list` still shows its name, marked *remembered*, with a
+  `known` line saying which identifier matched. `airdrop name ID NAME` names one by hand.
+  Addresses can rotate (for example after a restart), so treat it as a strong hint.
 - **IDs can change** when the receiver restarts AirDrop. List again if a send times out
   in `connecting`.
 - **The receiver must be awake and nearby**, with AirDrop set to *Everyone* (or

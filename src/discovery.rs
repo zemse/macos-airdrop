@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::ble;
 use crate::caps::{Features, Media};
+use crate::known;
 use crate::presence;
 use crate::probe;
 use crate::sharing::{Activation, Sharing, main_queue};
@@ -124,6 +125,9 @@ pub struct Scan {
     /// Every Apple device heard over Bluetooth LE, nearest first. Only in debug mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ble: Option<Vec<ble::BleDevice>>,
+    /// Why the store of known names could not be read or written, when it could not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub store_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -164,6 +168,8 @@ pub struct Peer {
     pub media: Option<Media>,
     /// Why `/Discover` failed, when it did.
     pub discover_error: Option<String>,
+    /// The name remembered from an earlier `list`, for a receiver that withheld it.
+    pub known: Option<known::Known>,
     pub raw: Raw,
 }
 
@@ -266,6 +272,7 @@ extern "C" fn on_browse(
         features: None,
         media: None,
         discover_error: None,
+        known: None,
         raw: Raw::default(),
     });
     if !peer.network.interfaces.contains(&ifname) {
@@ -524,6 +531,7 @@ pub fn discover(wait: Duration, debug: bool, min_rssi: i32) -> Result<Scan, Stri
         ),
         Some(Err(e)) => (Some(Vec::new()), Some(e)),
     };
+    let store_error = known::apply(&mut peers).err();
     let near = hidden.iter().filter(|d| d.rssi >= min_rssi).count();
     let likely_hiding = near.saturating_sub(peers.len());
     Ok(Scan {
@@ -535,6 +543,7 @@ pub fn discover(wait: Duration, debug: bool, min_rssi: i32) -> Result<Scan, Stri
         awdl,
         awdl_error,
         ble: debug.then_some(ble),
+        store_error,
     })
 }
 

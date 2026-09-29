@@ -2,6 +2,7 @@ mod ble;
 mod caps;
 mod cf;
 mod discovery;
+mod known;
 mod mcp;
 mod presence;
 mod probe;
@@ -102,6 +103,14 @@ terminal app.
 The decoding comes from reverse engineering done on iOS 13 and can be wrong on newer
 systems.
 
+Known names: every name a receiver reports is remembered in ~/.airdrop/known.json with
+its ID, host and link-local addresses. A receiver gets a new ID and host when it switches
+AirDrop mode, but its AWDL address stayed the same across switches in testing, so when it
+later answers in Contacts Only mode `list` shows the remembered name, marked remembered,
+and a `known` line saying when it was named and which identifier matched. Name one by
+hand with `airdrop name`, drop one with `airdrop forget`. Addresses can rotate (for
+example after a restart), so a remembered name is a strong hint, not proof.
+
 A receiver's ID and host change when it switches AirDrop mode. An empty list
 means nobody is discoverable: the receiver's screen may be off, or its AirDrop set to
 Receiving Off.
@@ -110,11 +119,12 @@ JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"airdropable\"
 \"network\": {\"interfaces\", \"addresses\", \"host\", \"port\", \"responded_via\",
 \"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
 \"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
-\"live_photo_version\", \"asset_bundle_version\"}, \"discover_error\",
+\"live_photo_version\", \"asset_bundle_version\"}, \"discover_error\", \"known\": {\"name\",
+\"model\", \"matched_by\", \"named_at\"},
 \"raw\": {\"txt\", \"discover\"}}], \"likely_hiding\", \"min_rssi\", \"hidden\": [{\"id\", \"name\", \"rssi\", \"kind\",
 \"airdrop\", \"messages\": [{\"type\", \"name\", \"details\", \"unverified\", \"hex\"}]}], \"hidden_error\",
 \"awdl\": [{\"address\"}], \"awdl_error\", \"ble\": [same as hidden]}; awdl, awdl_error and
-ble only with --debug.")]
+ble only with --debug; \"store_error\" when ~/.airdrop/known.json could not be updated.")]
     List {
         /// Seconds to browse for.
         #[arg(short, long, default_value_t = 8.0, value_name = "SECS")]
@@ -162,6 +172,26 @@ JSON output (--json): {\"outcome\": \"finished\"|\"canceled\"|\"failed\"|\"timed
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Remember a name for a receiver, shown when it withholds its own.
+    #[command(long_about = "\
+Remember a name for a receiver, shown by `list` when it withholds its own.
+
+`list` already remembers the name of every receiver set to Everyone in
+~/.airdrop/known.json, and shows it (marked remembered) when the same device later
+answers in Contacts Only mode. Use this for a receiver that was never seen in Everyone
+mode. ID is its current ID from `list`; `list` then learns its other identifiers.")]
+    Name {
+        /// Receiver ID from `airdrop list`.
+        id: String,
+        /// Name to show for it.
+        name: String,
+    },
+    /// Forget a remembered receiver name.
+    Forget {
+        /// The remembered name, or one of the receiver's IDs.
+        #[arg(value_name = "NAME|ID")]
+        key: String,
+    },
     /// Run an MCP server on stdio, exposing `list_peers` and `send` tools.
     #[command(long_about = "\
 Run a Model Context Protocol server on stdio, exposing `list_peers` and `send` tools
@@ -180,18 +210,40 @@ fn duration(secs: f64) -> Result<Duration, String> {
 
 /// Prints one block per receiver: a heading, then labelled detail lines.
 fn print_peer(p: &discovery::Peer) {
-    let name = match (&p.name, &p.raw.discover) {
-        (Some(n), _) => n.as_str(),
+    let name = match (&p.name, &p.known, &p.raw.discover) {
+        (Some(n), ..) => n.clone(),
+        (None, Some(k), Some(_)) => format!(
+            "{} (remembered; Contacts Only, likely has you as a contact)",
+            k.name
+        ),
+        (None, Some(k), None) => format!("{} (remembered; no reply)", k.name),
         // Contacts Only receivers answer but withhold their name.
-        (None, Some(_)) => "(name hidden: Contacts Only, likely has you as a contact)",
-        (None, None) => "(no reply)",
+        (None, None, Some(_)) => "(name hidden: Contacts Only, likely has you as a contact)".into(),
+        (None, None, None) => "(no reply)".into(),
     };
-    match &p.model {
+    match p
+        .model
+        .as_ref()
+        .or(p.known.as_ref().and_then(|k| k.model.as_ref()))
+    {
         Some(m) => println!("{name} ({m})"),
         None => println!("{name}"),
     }
     let line = |label: &str, value: &str| println!("  {label:<9} {value}");
     line("id", &p.id);
+    if let Some(k) = &p.known {
+        let by = match k.matched_by {
+            "address" => "link-local address",
+            other => other,
+        };
+        line(
+            "known",
+            &format!(
+                "named {}, matched by {by}",
+                ago(known::now().saturating_sub(k.named_at))
+            ),
+        );
+    }
     if let Some(a) = p.airdropable {
         line("airdrop", if a { "available" } else { "unavailable" });
     }
@@ -269,6 +321,17 @@ fn print_ble_device(d: &ble::BleDevice, messages: bool) {
         line += &format!("[{}]", m.hex);
         println!("{line}");
     }
+}
+
+/// `secs` as a rough age, e.g. `3 hours ago`.
+fn ago(secs: u64) -> String {
+    let (n, unit) = match secs {
+        0..60 => return "just now".into(),
+        60..3600 => (secs / 60, "minute"),
+        3600..86_400 => (secs / 3600, "hour"),
+        _ => (secs / 86_400, "day"),
+    };
+    format!("{} ago", plural(n as usize, unit))
 }
 
 fn plural(n: usize, word: &str) -> String {
@@ -365,7 +428,34 @@ fn list(wait: f64, as_json: bool, debug: bool, min_rssi: i32) -> Result<ExitCode
     if let Some(e) = &scan.awdl_error {
         eprintln!("note: could not ping AWDL: {e}");
     }
+    if let Some(e) = &scan.store_error {
+        eprintln!("note: could not update known names: {e}");
+    }
     Ok(ExitCode::SUCCESS)
+}
+
+fn name_cmd(id: &str, name: &str) -> Result<ExitCode, String> {
+    let mut store = known::Store::load()?;
+    let sighting = known::Sighting {
+        id: id.to_owned(),
+        ..Default::default()
+    };
+    store.named(&sighting, name, None, known::now());
+    store.save()?;
+    println!("{id} is now known as {name}");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn forget_cmd(key: &str) -> Result<ExitCode, String> {
+    let mut store = known::Store::load()?;
+    match store.forget(key) {
+        0 => Err(format!("no known receiver is called or has the ID {key}")),
+        n => {
+            store.save()?;
+            println!("forgot {}", plural(n, "receiver"));
+            Ok(ExitCode::SUCCESS)
+        }
+    }
 }
 
 fn human_bytes(bytes: u64) -> String {
@@ -489,6 +579,8 @@ fn main() -> ExitCode {
             json,
             verbose,
         } => send_cmd(&peer_id, &items, timeout, json, verbose),
+        Command::Name { id, name } => name_cmd(&id, &name),
+        Command::Forget { key } => forget_cmd(&key),
         Command::Mcp => mcp::serve()
             .map(|()| ExitCode::SUCCESS)
             .map_err(|e| format!("MCP server I/O error: {e}")),
