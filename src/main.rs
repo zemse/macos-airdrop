@@ -44,19 +44,6 @@ Exit codes:
   3  send was declined or canceled
   4  send timed out (the operation was canceled)";
 
-#[cfg(test)]
-mod tests {
-    use super::human_bytes;
-
-    #[test]
-    fn bytes() {
-        assert_eq!(human_bytes(512), "512 B");
-        assert_eq!(human_bytes(1_500), "1.5 KB");
-        assert_eq!(human_bytes(302_083_218), "302.1 MB");
-        assert_eq!(human_bytes(4_500_000_000), "4.5 GB");
-    }
-}
-
 #[derive(Parser)]
 #[command(name = "airdrop", version, about = ABOUT, long_about = LONG_ABOUT, after_help = EXIT_CODES)]
 struct Cli {
@@ -358,4 +345,17 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         ExitCode::FAILURE
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::human_bytes;
+
+    #[test]
+    fn bytes() {
+        assert_eq!(human_bytes(512), "512 B");
+        assert_eq!(human_bytes(1_500), "1.5 KB");
+        assert_eq!(human_bytes(302_083_218), "302.1 MB");
+        assert_eq!(human_bytes(4_500_000_000), "4.5 GB");
+    }
 }
