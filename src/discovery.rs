@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::caps::{Features, Media};
 
+use crate::presence;
 use crate::probe;
 use crate::sharing::{Activation, Sharing, main_queue};
 
@@ -93,6 +94,23 @@ struct IfAddrs {
 const FLAG_ADD: u32 = 0x2;
 const FLAG_INCLUDE_AWDL: u32 = 0x10_0000;
 const SERVICE_TYPE: &CStr = c"_airdrop._tcp";
+
+/// Everything `list` finds.
+#[derive(Debug, Clone, Serialize)]
+pub struct Scan {
+    pub peers: Vec<Peer>,
+    /// Apple devices answering on AWDL that do not offer AirDrop to us, e.g. Contacts Only
+    /// receivers without us in their contacts. Also AirPlay, Sidecar or Universal Control
+    /// peers. Anonymous: link-local addresses are randomized.
+    pub hidden: Vec<Hidden>,
+    /// Why the presence probe failed, when it did.
+    pub hidden_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Hidden {
+    pub address: String,
+}
 
 /// A receiver's AirDrop setting, inferred from its `/Discover` reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -410,7 +428,7 @@ fn identify(peers: &mut [Peer], timeout: Duration) {
 
 /// Browses for `wait`, then returns every other receiver still advertising, with the names
 /// they report.
-pub fn discover(wait: Duration) -> Result<Vec<Peer>, String> {
+pub fn discover(wait: Duration) -> Result<Scan, String> {
     let sharing = Sharing::get()?;
     let _activation = Activation::start(sharing);
     let state = Box::new(RefCell::new(State::default()));
@@ -451,8 +469,30 @@ pub fn discover(wait: Duration) -> Result<Vec<Peer>, String> {
         .collect();
     drop(st);
     // Still inside the activation, so AWDL stays up while the peers are asked.
-    identify(&mut peers, Duration::from_secs(4));
-    Ok(peers)
+    let neighbours = std::thread::scope(|scope| {
+        let probe = scope.spawn(|| presence::awdl_neighbours(Duration::from_millis(1500)));
+        identify(&mut peers, Duration::from_secs(4));
+        probe
+            .join()
+            .unwrap_or_else(|_| Err("presence probe panicked".into()))
+    });
+    let seen: Vec<&String> = peers.iter().flat_map(|p| &p.network.addresses).collect();
+    let (hidden, hidden_error) = match neighbours {
+        Ok(found) => (
+            found
+                .into_iter()
+                .filter(|a| !local.contains(a) && !seen.contains(&a))
+                .map(|address| Hidden { address })
+                .collect(),
+            None,
+        ),
+        Err(e) => (Vec::new(), Some(e)),
+    };
+    Ok(Scan {
+        peers,
+        hidden,
+        hidden_error,
+    })
 }
 
 #[cfg(test)]

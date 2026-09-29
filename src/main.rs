@@ -2,6 +2,7 @@ mod caps;
 mod cf;
 mod discovery;
 mod mcp;
+mod presence;
 mod probe;
 mod send;
 mod sharing;
@@ -75,11 +76,17 @@ does (AirDrop /Discover). This Mac is left out. For each receiver it prints:
   video, hdr, images, photos
                 media the receiver can handle (HEVC, ProRes, Dolby Vision, HEIC, ...)
 
+After the receivers it lists \"nearby but hidden\" devices: Apple devices answering an
+IPv6 ping on AWDL that do not offer AirDrop to you, such as Contacts Only receivers
+without you in their contacts. They are anonymous (random link-local addresses), and
+AWDL is also used by AirPlay, Sidecar and Universal Control, so not every one is an
+AirDrop receiver.
+
 A receiver's ID and host change when it switches AirDrop mode. An empty list
 means nobody is discoverable: the receiver's screen may be off, or its AirDrop set to
 Receiving Off.
 
-JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"airdropable\", \"mode\",
+JSON output (--json): {\"hidden\": [{\"address\"}], \"hidden_error\", \"peers\": [{\"id\", \"name\", \"model\", \"airdropable\", \"mode\",
 \"network\": {\"interfaces\", \"addresses\", \"host\", \"port\", \"responded_via\",
 \"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
 \"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
@@ -207,20 +214,37 @@ fn print_peer(p: &discovery::Peer) {
 }
 
 fn list(wait: f64, as_json: bool) -> Result<ExitCode, String> {
-    let peers = discovery::discover(duration(wait)?)?;
+    let scan = discovery::discover(duration(wait)?)?;
     if as_json {
-        println!("{}", json!({ "peers": peers }));
-    } else if peers.is_empty() {
+        println!("{}", json!(scan));
+        return Ok(ExitCode::SUCCESS);
+    }
+    for (i, p) in scan.peers.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        print_peer(p);
+    }
+    if !scan.hidden.is_empty() {
+        if !scan.peers.is_empty() {
+            println!();
+        }
+        let n = scan.hidden.len();
+        let s = if n == 1 { "" } else { "s" };
+        println!(
+            "nearby but hidden: {n} more Apple device{s} on AWDL, not offering AirDrop to you"
+        );
+        for h in &scan.hidden {
+            println!("  {}", h.address);
+        }
+    }
+    if scan.peers.is_empty() && scan.hidden.is_empty() {
         eprintln!(
             "no AirDrop receivers found in {wait}s (is the receiver awake, nearby, and set to Everyone?)"
         );
-    } else {
-        for (i, p) in peers.iter().enumerate() {
-            if i > 0 {
-                println!();
-            }
-            print_peer(p);
-        }
+    }
+    if let Some(e) = &scan.hidden_error {
+        eprintln!("note: could not check for hidden devices: {e}");
     }
     Ok(ExitCode::SUCCESS)
 }

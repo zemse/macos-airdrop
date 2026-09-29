@@ -43,7 +43,10 @@ fn tools() -> Value {
                 mode is everyone or contacts_only; a contacts_only receiver answers without \
                 a name or features and is only visible if it likely has you as a contact. \
                 discover_error is set when the receiver did not answer. \
-                This Mac is excluded. An empty list means nobody is discoverable: the \
+                hidden lists anonymous Apple devices answering on AWDL that do not offer \
+                AirDrop to you (e.g. Contacts Only receivers without you as a contact; also \
+                AirPlay/Sidecar peers). This Mac is excluded. Empty peers means nobody is \
+                discoverable to you: the \
                 receiver's screen may be off, or AirDrop set to Receiving Off.",
             "inputSchema": {
                 "type": "object",
@@ -132,7 +135,7 @@ fn call_tool(params: &Value, notify: &mut dyn FnMut(Value)) -> Result<Value, (i6
         .unwrap_or_else(|| json!({}));
     match name {
         "list_peers" => Ok(match discovery::discover(secs(&args, "wait_secs", 5.0)) {
-            Ok(peers) => tool_result(json!({ "peers": peers }), false),
+            Ok(scan) => tool_result(json!(scan), false),
             Err(e) => tool_error(e),
         }),
         "send" => {
