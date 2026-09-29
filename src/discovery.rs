@@ -94,6 +94,18 @@ const FLAG_ADD: u32 = 0x2;
 const FLAG_INCLUDE_AWDL: u32 = 0x10_0000;
 const SERVICE_TYPE: &CStr = c"_airdrop._tcp";
 
+/// A receiver's AirDrop setting, inferred from its `/Discover` reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// Replied with its name.
+    Everyone,
+    /// Replied without a name. Such receivers only show up for senders whose Bluetooth
+    /// short identity hash matches one of their contacts, so it likely has you saved
+    /// (2-byte hashes collide, so not certainly).
+    ContactsOnly,
+}
+
 /// A receiver advertising the AirDrop service.
 #[derive(Debug, Clone, Serialize)]
 pub struct Peer {
@@ -106,6 +118,8 @@ pub struct Peer {
     /// The receiver's `IsAirDropable` reply. It was true in both Everyone and Contacts Only
     /// modes, including from strangers, so it does not mean the receiver accepts from you.
     pub airdropable: Option<bool>,
+    /// `None` when the receiver did not answer `/Discover`.
+    pub mode: Option<Mode>,
     pub network: Network,
     /// Decoded TXT `flags`.
     pub features: Option<Features>,
@@ -210,6 +224,7 @@ extern "C" fn on_browse(
         name: None,
         model: None,
         airdropable: None,
+        mode: None,
         network: Network::default(),
         features: None,
         media: None,
@@ -375,6 +390,11 @@ fn identify(peers: &mut [Peer], timeout: Duration) {
                         peer.name = text("ReceiverComputerName");
                         peer.model = text("ReceiverModelName");
                         peer.airdropable = r.reply["IsAirDropable"].as_bool();
+                        peer.mode = Some(if peer.name.is_some() {
+                            Mode::Everyone
+                        } else {
+                            Mode::ContactsOnly
+                        });
                         let caps = &r.reply["ReceiverMediaCapabilities"];
                         peer.media = caps.is_object().then(|| Media::parse(caps));
                         peer.network.responded_via = Some(r.via);

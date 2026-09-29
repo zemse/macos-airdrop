@@ -62,6 +62,10 @@ does (AirDrop /Discover). This Mac is left out. For each receiver it prints:
 
   name, model   device name (and model, when the receiver sends one). Receivers set to
                 Contacts Only answer but withhold their name and TXT flags.
+  mode          everyone, or contacts_only. A Contacts Only receiver only shows up at
+                all if one of your identifiers is in its contacts (matched on a 2-byte
+                hash, so about 1 in 20 such matches can be a false positive for a large
+                address book); ones that do not have you stay invisible.
   airdrop       the receiver's IsAirDropable reply (true even for Contacts Only
                 receivers that may decline you)
   id            what `send` takes
@@ -75,7 +79,7 @@ A receiver's ID and host change when it switches AirDrop mode. An empty list
 means nobody is discoverable: the receiver's screen may be off, or its AirDrop set to
 Receiving Off.
 
-JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"airdropable\",
+JSON output (--json): {\"peers\": [{\"id\", \"name\", \"model\", \"airdropable\", \"mode\",
 \"network\": {\"interfaces\", \"addresses\", \"host\", \"port\", \"responded_via\",
 \"response_ms\"}, \"features\": {\"flags\", \"hex\", \"known\", \"unknown_bits\"},
 \"media\": {\"video_codecs\", \"hdr\", \"dolby_vision\", \"image_formats\",
@@ -143,7 +147,7 @@ fn print_peer(p: &discovery::Peer) {
     let name = match (&p.name, &p.raw.discover) {
         (Some(n), _) => n.as_str(),
         // Contacts Only receivers answer but withhold their name.
-        (None, Some(_)) => "(name hidden: Contacts Only)",
+        (None, Some(_)) => "(name hidden: Contacts Only, likely has you as a contact)",
         (None, None) => "(no reply)",
     };
     match &p.model {

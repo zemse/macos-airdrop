@@ -77,6 +77,11 @@ claude mcp add airdrop -- airdrop mcp
   name and capabilities with AirDrop's `/Discover` request, as Finder does. Receivers
   set to *Contacts Only* answer but withhold their name and feature flags, and their ID
   changes whenever they switch AirDrop mode.
+- **Contacts Only receivers are visible only if they have you.** `list` makes `sharingd`
+  advertise 2-byte hashes of your phone numbers and emails over Bluetooth; a Contacts Only
+  receiver opens its AirDrop service only when one matches its contacts. So a hidden-name
+  receiver in `list` likely has you saved (2-byte hashes can collide), and one that does
+  not have you does not appear at all.
 - **IDs can change** when the receiver restarts AirDrop. List again if a send times out
   in `connecting`.
 - **The receiver must be awake and nearby**, with AirDrop set to *Everyone* (or

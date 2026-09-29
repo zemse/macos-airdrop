@@ -19,7 +19,8 @@ Send files and links to nearby Apple devices over AirDrop, from this Mac, with n
 Workflow: call list_peers, then send with a peer_id from its result.
 - Peer IDs are opaque Bonjour instance names (e.g. \"571707478742\"); list_peers also \
 returns each receiver's device name, so match on name and send by id. Receivers set to \
-Contacts Only withhold their name; their ID also changes when they switch AirDrop mode.
+Contacts Only withhold their name (mode = contacts_only) and only appear at all if they \
+likely have this Mac's owner as a contact; their ID changes when they switch AirDrop mode.
 - IDs can change when the receiver restarts AirDrop, so list again if send times out in \
 \"connecting\".
 - The receiver must be awake and nearby, with AirDrop set to \"Everyone\" (or \"Contacts \
@@ -39,7 +40,8 @@ fn tools() -> Value {
                 (interfaces: awdl0 = peer-to-peer Wi-Fi, en0 = shared network; addresses; \
                 response_ms), features (decoded capability flags), media (video codecs, HDR, \
                 Dolby Vision, image formats) and raw (TXT record and full /Discover reply). \
-                Receivers in Contacts Only mode answer without a name or features. \
+                mode is everyone or contacts_only; a contacts_only receiver answers without \
+                a name or features and is only visible if it likely has you as a contact. \
                 discover_error is set when the receiver did not answer. \
                 This Mac is excluded. An empty list means nobody is discoverable: the \
                 receiver's screen may be off, or AirDrop set to Receiving Off.",
