@@ -98,7 +98,7 @@ JSON output (--json): {\"outcome\": \"finished\"|\"canceled\"|\"failed\"|\"timed
         /// Print the result as JSON.
         #[arg(long)]
         json: bool,
-        /// Print every raw sharingd event to stderr as a JSON line.
+        /// Also print every raw sharingd event to stderr as a JSON line.
         #[arg(short, long)]
         verbose: bool,
     },
@@ -145,29 +145,32 @@ fn list(wait: f64, as_json: bool) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1e6)
+}
+
 /// Prints one human progress line per meaningful event.
 fn progress_line(ev: &Event, last_pct: &mut Option<u64>) -> Option<String> {
-    let num = |k: &str| {
-        ev.data
-            .as_object()?
-            .iter()
-            .find(|(key, _)| key.contains(k))
-            .and_then(|(_, v)| v.as_f64())
-    };
     match ev.event {
         "connecting" => Some("connecting…".into()),
         "waiting_for_answer" => Some("waiting for the receiver to accept…".into()),
         "started" => Some("transferring…".into()),
         "progress" => {
-            let (done, total) = (num("BytesCopied")?, num("TotalBytes")?);
-            if total <= 0.0 {
+            let p = ev.progress()?;
+            let pct = p.bytes * 100 / p.total / 10 * 10;
+            if *last_pct == Some(pct) {
                 return None;
             }
-            let pct = (done / total * 100.0) as u64 / 10 * 10;
-            (*last_pct != Some(pct)).then(|| {
-                *last_pct = Some(pct);
-                format!("{pct}%")
-            })
+            *last_pct = Some(pct);
+            let left = match p.secs_left {
+                Some(s) if pct < 100 => format!(", {s}s left"),
+                _ => String::new(),
+            };
+            Some(format!(
+                "{pct:>3}%  {} of {}{left}",
+                megabytes(p.bytes),
+                megabytes(p.total)
+            ))
         }
         _ => None,
     }
@@ -219,7 +222,8 @@ fn send_cmd(
     let report = send::send(peer_id, &items, duration(timeout)?, |ev| {
         if verbose {
             eprintln!("{}", json!(ev));
-        } else if let Some(line) = progress_line(ev, &mut last_pct) {
+        }
+        if let Some(line) = progress_line(ev, &mut last_pct) {
             eprintln!("{line}");
         }
     })?;

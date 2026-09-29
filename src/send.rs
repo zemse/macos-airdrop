@@ -90,6 +90,25 @@ pub struct Event {
     pub data: Value,
 }
 
+/// Transfer progress carried by `started`, `progress` and `finished` events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    pub bytes: u64,
+    pub total: u64,
+    pub secs_left: Option<u64>,
+}
+
+impl Event {
+    pub fn progress(&self) -> Option<Progress> {
+        let num = |k: &str| self.data.get(k).and_then(Value::as_u64);
+        Some(Progress {
+            bytes: num("BytesCopied")?,
+            total: num("TotalBytes").filter(|&t| t > 0)?,
+            secs_left: num("TimeRemaining"),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {

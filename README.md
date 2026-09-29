@@ -56,8 +56,8 @@ airdrop send 571707478742 report.pdf --json --timeout 60
 
 - **`list_peers`** `{wait_secs?}` returns nearby receivers.
 - **`send`** `{peer_id, items, timeout_secs?}` sends absolute paths or URLs and returns the
-  outcome, receiver name and model. It emits `notifications/progress` when the client
-  passes a progress token.
+  outcome, receiver name and model. When the client passes a progress token it emits
+  `notifications/progress` with bytes sent and total.
 
 ```sh
 claude mcp add airdrop -- airdrop mcp

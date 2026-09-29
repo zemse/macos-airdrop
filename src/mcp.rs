@@ -147,17 +147,27 @@ fn call_tool(params: &Value, notify: &mut dyn FnMut(Value)) -> Result<Value, (i6
                 .get("_meta")
                 .and_then(|m| m.get("progressToken"))
                 .cloned();
-            let mut n = 0u64;
+            let mut sent = None;
             let timeout = secs(&args, "timeout_secs", 150.0);
             let result = send::send(peer_id, &items, timeout, |ev| {
-                if let Some(token) = &token {
-                    n += 1;
-                    notify(json!({
-                        "jsonrpc": "2.0",
-                        "method": "notifications/progress",
-                        "params": { "progressToken": token, "progress": n, "message": ev.event },
-                    }));
+                // Progress must strictly increase, so only byte counts are reported.
+                let (Some(token), Some(p)) = (&token, ev.progress()) else {
+                    return;
+                };
+                if sent.is_some_and(|s| p.bytes <= s) {
+                    return;
                 }
+                sent = Some(p.bytes);
+                notify(json!({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/progress",
+                    "params": {
+                        "progressToken": token,
+                        "progress": p.bytes,
+                        "total": p.total,
+                        "message": format!("{} of {} bytes sent", p.bytes, p.total),
+                    },
+                }));
             });
             Ok(match result {
                 Ok(report) => {
