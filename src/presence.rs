@@ -23,7 +23,8 @@ unsafe extern "C" {
 }
 
 /// Addresses (`fe80::…%awdl0`) of every other device answering on AWDL within `wait`
-/// (this Mac does not answer its own ping). Pings a few times because AWDL drops packets while it hops channels.
+/// (this Mac does not answer its own ping). Pings a few times because AWDL drops packets
+/// while it hops channels.
 pub fn awdl_neighbours(wait: Duration) -> Result<Vec<String>, String> {
     let index = unsafe { if_nametoindex(c"awdl0".as_ptr()) };
     if index == 0 {
